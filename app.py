@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import contextlib
 import io
 import json
@@ -22,6 +23,10 @@ st.set_page_config(
 )
 
 
+# ---------------------------------------------------------------------------
+# Session State / JSON
+# ---------------------------------------------------------------------------
+
 def widget_key(field: dict[str, Any]) -> str:
     return f"input_{field['key']}"
 
@@ -36,11 +41,6 @@ def normalize_loaded_config(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def sync_widgets_from_config(config: dict[str, Any]) -> None:
-    """Wichtig: bereits existierende Streamlit-Widgets behalten sonst alte Werte.
-
-    Beim Laden einer JSON-Datei müssen daher nicht nur st.session_state.config,
-    sondern auch die Widget-Keys selbst aktualisiert werden.
-    """
     for field in FIELDS:
         key = widget_key(field)
         value = config.get(field["name"], field["default"])
@@ -73,6 +73,14 @@ def init_session_state() -> None:
     if "last_loaded_json_name" not in st.session_state:
         st.session_state.last_loaded_json_name = None
 
+
+def config_to_json_bytes(config: dict[str, Any]) -> bytes:
+    return json.dumps(config, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Uploads / UI widgets
+# ---------------------------------------------------------------------------
 
 def save_uploaded_file(uploaded_file) -> str | None:
     if uploaded_file is None:
@@ -126,9 +134,9 @@ def render_group(group_key: str, config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def config_to_json_bytes(config: dict[str, Any]) -> bytes:
-    return json.dumps(config, ensure_ascii=False, indent=2).encode("utf-8")
-
+# ---------------------------------------------------------------------------
+# Adapter from Streamlit config to existing calculation signature
+# ---------------------------------------------------------------------------
 
 def bool_from_value(value: Any) -> bool:
     return str(value).lower() == "true" if isinstance(value, str) else bool(value)
@@ -250,59 +258,117 @@ def call_bike_power_calc(config: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Result rendering
+# ---------------------------------------------------------------------------
+
+def format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "—"
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def pdf_viewer(pdf_path: Path, height: int = 760) -> None:
+    """PDF direkt in Streamlit anzeigen."""
+    try:
+        encoded = base64.b64encode(pdf_path.read_bytes()).decode("utf-8")
+        iframe = (
+            f'<iframe src="data:application/pdf;base64,{encoded}" '
+            f'width="100%" height="{height}" type="application/pdf"></iframe>'
+        )
+        st.components.v1.html(iframe, height=height + 20)
+    except Exception as exc:
+        st.info(f"PDF-Vorschau konnte nicht angezeigt werden: {exc}")
+
+
+def html_map_viewer(map_path: Path, height: int = 650) -> None:
+    try:
+        st.components.v1.html(map_path.read_text(encoding="utf-8"), height=height)
+    except UnicodeDecodeError:
+        st.components.v1.html(map_path.read_text(encoding="latin-1"), height=height)
+
+
 def render_results(result: dict[str, Any] | None, run_log: str) -> None:
     if not result:
         return
 
     st.subheader("Ergebnisse")
 
-    cols = st.columns(3)
     distance = result.get("distance_km")
     duration = result.get("duration_s")
     avg_speed = result.get("average_speed_kmh")
 
-    cols[0].metric("Distanz", "—" if distance is None else f"{distance:.2f} km")
-    if duration is None:
-        cols[1].metric("Zeit", "—")
-    else:
-        h = int(duration // 3600)
-        m = int((duration % 3600) // 60)
-        s = int(duration % 60)
-        cols[1].metric("Zeit", f"{h:02d}:{m:02d}:{s:02d}")
-    cols[2].metric("Ø Geschwindigkeit", "—" if avg_speed is None else f"{avg_speed:.2f} km/h")
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Titel", result.get("title", "—"))
+    metric_cols[1].metric("Distanz", "—" if distance is None else f"{distance:.2f} km")
+    metric_cols[2].metric("Zeit", format_duration(duration))
+    metric_cols[3].metric("Ø Geschwindigkeit", "—" if avg_speed is None else f"{avg_speed:.2f} km/h")
 
-    pdf_path = result.get("pdf_path")
-    if pdf_path and Path(pdf_path).exists():
-        st.download_button(
-            "PDF herunterladen",
-            data=Path(pdf_path).read_bytes(),
-            file_name=Path(pdf_path).name,
-            mime="application/pdf",
-            use_container_width=True,
-        )
+    pdf_path_value = result.get("pdf_path")
+    map_path_value = result.get("map_path")
 
-    map_path = result.get("map_path")
-    if map_path and Path(map_path).exists():
-        st.download_button(
-            "HTML-Karte herunterladen",
-            data=Path(map_path).read_bytes(),
-            file_name=Path(map_path).name,
-            mime="text/html",
-            use_container_width=True,
-        )
-        with st.expander("HTML-Karte anzeigen"):
-            st.components.v1.html(Path(map_path).read_text(encoding="utf-8"), height=600)
+    pdf_path = Path(pdf_path_value) if pdf_path_value else None
+    map_path = Path(map_path_value) if map_path_value else None
 
-    if run_log:
-        with st.expander("Berechnungslog anzeigen"):
+    download_cols = st.columns(2)
+
+    with download_cols[0]:
+        if pdf_path and pdf_path.exists():
+            st.download_button(
+                "PDF herunterladen",
+                data=pdf_path.read_bytes(),
+                file_name=pdf_path.name,
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        else:
+            st.info("Keine PDF-Datei gefunden.")
+
+    with download_cols[1]:
+        if map_path and map_path.exists():
+            st.download_button(
+                "HTML-Karte herunterladen",
+                data=map_path.read_bytes(),
+                file_name=map_path.name,
+                mime="text/html",
+                use_container_width=True,
+            )
+        else:
+            st.info("Keine HTML-Karte gefunden.")
+
+    result_tabs = st.tabs(["📄 PDF", "🗺 Karte", "🧾 Berechnungslog"])
+
+    with result_tabs[0]:
+        if pdf_path and pdf_path.exists():
+            pdf_viewer(pdf_path)
+        else:
+            st.warning("PDF-Vorschau nicht verfügbar.")
+
+    with result_tabs[1]:
+        if map_path and map_path.exists():
+            html_map_viewer(map_path)
+        else:
+            st.warning("Karte nicht verfügbar.")
+
+    with result_tabs[2]:
+        if run_log:
             st.code(run_log)
+        else:
+            st.info("Kein Berechnungslog vorhanden.")
 
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main() -> None:
     init_session_state()
 
     st.title("🚴 Bike Power Calculator")
-    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 0.4")
+    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 0.5")
 
     with st.sidebar:
         st.header("Einstellungen")
@@ -331,10 +397,11 @@ def main() -> None:
             data=config_to_json_bytes(st.session_state.config),
             file_name="BikePowerCalculator_INPUT.json",
             mime="application/json",
+            use_container_width=True,
         )
 
         st.divider()
-        st.success("Version 0.4: JSON-Laden korrigiert, Fehlerlog erweitert.")
+        st.success("Version 0.5: Ergebnisdarstellung verbessert.")
 
     config = st.session_state.config.copy()
 
@@ -372,19 +439,32 @@ def main() -> None:
 
     st.divider()
 
-    if st.button("Berechnung starten", type="primary", use_container_width=True):
+    run_col, info_col = st.columns([1, 2])
+
+    with run_col:
+        start_clicked = st.button("Berechnung starten", type="primary", use_container_width=True)
+
+    with info_col:
+        st.info("Die Berechnung kann je nach Streckenlänge und Wettermodell etwas dauern. Danach erscheinen PDF, Karte und Log direkt unten.")
+
+    if start_clicked:
         if not st.session_state.config.get("GPX/FIT Datei"):
             st.error("Bitte zuerst eine GPX- oder FIT-Datei hochladen.")
         else:
             log_buffer = io.StringIO()
+            progress = st.progress(0, text="Berechnung wird vorbereitet …")
             try:
                 with st.spinner("Berechnung läuft …"):
+                    progress.progress(10, text="Eingaben werden geprüft …")
                     with contextlib.redirect_stdout(log_buffer):
+                        progress.progress(25, text="Strecke und Wetter werden verarbeitet …")
                         result = call_bike_power_calc(st.session_state.config)
+                    progress.progress(100, text="Berechnung abgeschlossen.")
                 st.session_state.result = result
                 st.session_state.run_log = log_buffer.getvalue()
                 st.success("Berechnung abgeschlossen.")
             except Exception as exc:
+                progress.empty()
                 st.session_state.result = None
                 st.session_state.run_log = log_buffer.getvalue() + "\n\nTRACEBACK:\n" + traceback.format_exc()
                 st.error(f"Berechnung abgebrochen: {exc}")

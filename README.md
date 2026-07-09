@@ -1,14 +1,17 @@
 # Bike Power Calculator – Streamlit
 
-## Stand Version 0.4
+## Stand Version 0.5
 
-Korrekturen gegenüber Version 0.3:
+Neue Funktionen gegenüber Version 0.4:
 
-- JSON-Upload überschreibt jetzt auch die bereits vorhandenen Streamlit-Widget-Werte.
-- Nach dem Laden einer JSON-Datei wird die App automatisch neu geladen.
-- Fehlerprotokoll enthält jetzt den vollständigen Python-Traceback.
-- Typische Null-Division-Stellen in Hilfsfunktionen wurden defensiv abgesichert.
-- Fehlende GPX/FIT- oder Wetterdateien werden vor der Berechnung klar gemeldet.
+- Ergebnisbereich deutlich verbessert
+- Kennzahlen als große Kacheln
+- PDF-Download
+- PDF-Vorschau direkt in Streamlit
+- HTML-Karte direkt in Streamlit sichtbar
+- HTML-Karte als Download
+- Ergebnis-Tabs für PDF, Karte und Berechnungslog
+- Fortschrittsanzeige während der Berechnung
 
 ## Lokal starten
 
@@ -16,3 +19,7 @@ Korrekturen gegenüber Version 0.3:
 pip install -r requirements.txt
 streamlit run app.py
 ```
+
+## Streamlit Community Cloud
+
+Repository bei GitHub hochladen und als Main file `app.py` auswählen.
