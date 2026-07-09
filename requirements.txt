@@ -12,3 +12,4 @@ requests-cache
 retry-requests
 Pillow
 meteostat
+pymupdf

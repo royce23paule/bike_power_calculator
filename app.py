@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import contextlib
 import io
 import json
@@ -271,17 +270,46 @@ def format_duration(seconds: float | None) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-def pdf_viewer(pdf_path: Path, height: int = 760) -> None:
-    """PDF direkt in Streamlit anzeigen."""
+def pdf_viewer(pdf_path: Path, max_pages: int = 12) -> None:
+    """PDF-Vorschau als Bilder rendern.
+
+    Ein eingebettetes PDF per iframe/data-URL wird von Chrome in manchen
+    Streamlit-Umgebungen blockiert. PyMuPDF rendert die PDF-Seiten als PNGs,
+    was deutlich robuster ist.
+    """
     try:
-        encoded = base64.b64encode(pdf_path.read_bytes()).decode("utf-8")
-        iframe = (
-            f'<iframe src="data:application/pdf;base64,{encoded}" '
-            f'width="100%" height="{height}" type="application/pdf"></iframe>'
+        import fitz  # PyMuPDF
+    except Exception:
+        st.info(
+            "PDF-Vorschau benötigt PyMuPDF. Der PDF-Download funktioniert trotzdem. "
+            "Bitte `pymupdf` in requirements.txt installieren."
         )
-        st.components.v1.html(iframe, height=height + 20)
+        return
+
+    try:
+        doc = fitz.open(pdf_path)
+        total_pages = len(doc)
+        pages_to_show = min(total_pages, max_pages)
+
+        st.caption(
+            f"Vorschau: {pages_to_show} von {total_pages} Seiten. "
+            "Die vollständige PDF steht oben als Download bereit."
+        )
+
+        zoom = st.slider("PDF-Vorschau Zoom", 1.0, 3.0, 1.6, 0.1)
+        matrix = fitz.Matrix(zoom, zoom)
+
+        for page_number in range(pages_to_show):
+            page = doc.load_page(page_number)
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            image_bytes = pix.tobytes("png")
+            st.image(image_bytes, caption=f"PDF-Seite {page_number + 1}", use_container_width=True)
+
+        if total_pages > max_pages:
+            st.info("Weitere Seiten sind in der herunterladbaren PDF enthalten.")
+
     except Exception as exc:
-        st.info(f"PDF-Vorschau konnte nicht angezeigt werden: {exc}")
+        st.info(f"PDF-Vorschau konnte nicht gerendert werden: {exc}")
 
 
 def html_map_viewer(map_path: Path, height: int = 650) -> None:
@@ -368,7 +396,7 @@ def main() -> None:
     init_session_state()
 
     st.title("🚴 Bike Power Calculator")
-    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 0.5")
+    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 0.6")
 
     with st.sidebar:
         st.header("Einstellungen")
@@ -401,7 +429,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.success("Version 0.5: Ergebnisdarstellung verbessert.")
+        st.success("Version 0.6: PDF-Vorschau Chrome-kompatibel.")
 
     config = st.session_state.config.copy()
 

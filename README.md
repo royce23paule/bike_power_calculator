@@ -1,17 +1,13 @@
 # Bike Power Calculator – Streamlit
 
-## Stand Version 0.5
+## Stand Version 0.6
 
-Neue Funktionen gegenüber Version 0.4:
+Korrektur gegenüber Version 0.5:
 
-- Ergebnisbereich deutlich verbessert
-- Kennzahlen als große Kacheln
-- PDF-Download
-- PDF-Vorschau direkt in Streamlit
-- HTML-Karte direkt in Streamlit sichtbar
-- HTML-Karte als Download
-- Ergebnis-Tabs für PDF, Karte und Berechnungslog
-- Fortschrittsanzeige während der Berechnung
+- PDF-Vorschau nutzt jetzt PyMuPDF und rendert Seiten als Bilder.
+- Dadurch wird der Chrome-Fehler „Diese Seite wurde von Chrome blockiert“ vermieden.
+- PDF-Download bleibt unverändert erhalten.
+- Karte, Ergebnis-Kacheln und Berechnungslog bleiben wie in Version 0.5.
 
 ## Lokal starten
 
@@ -19,7 +15,3 @@ Neue Funktionen gegenüber Version 0.4:
 pip install -r requirements.txt
 streamlit run app.py
 ```
-
-## Streamlit Community Cloud
-
-Repository bei GitHub hochladen und als Main file `app.py` auswählen.
