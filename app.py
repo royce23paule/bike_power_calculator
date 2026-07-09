@@ -11,7 +11,22 @@ from typing import Any
 import streamlit as st
 
 import bike_power_calc as bpc
-from defaults import FIELDS, GROUP_TITLES, defaults_dict, fields_for_group, ordered_values
+from defaults import FIELDS, GROUP_TITLES, defaults_dict, ordered_values
+
+# Fallback, falls in Streamlit Cloud versehentlich noch eine ältere defaults.py liegt.
+BASIC_FIELD_INDICES: set[int] = {
+    0, 1, 2, 3, 4, 5, 6, 11, 12, 16, 17, 18, 19, 21, 23, 24, 34
+}
+
+
+def fields_for_group(group_key: str, basic_only: bool | None = None) -> list[dict[str, Any]]:
+    group_fields = [field for field in FIELDS if field["group"] == group_key]
+    if basic_only is None:
+        return group_fields
+    if basic_only:
+        return [field for field in group_fields if int(field["index"]) in BASIC_FIELD_INDICES]
+    return [field for field in group_fields if int(field["index"]) not in BASIC_FIELD_INDICES]
+
 
 
 st.set_page_config(
@@ -469,7 +484,7 @@ def main() -> None:
     init_session_state()
 
     st.title("🚴 Bike Power Calculator")
-    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 0.7")
+    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 0.7.1")
     st.markdown(
         """
         <style>
@@ -511,7 +526,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.success("Version 0.7: kompakte Oberfläche + Expertenmodus.")
+        st.success("Version 0.7.1: Import-Fix + kompakte Oberfläche.")
 
     config = st.session_state.config.copy()
 

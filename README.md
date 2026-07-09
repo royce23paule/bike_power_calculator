@@ -1,14 +1,20 @@
 # Bike Power Calculator – Streamlit
 
-## Stand Version 0.7
+## Stand Version 0.7.1
 
-Neue Funktionen gegenüber Version 0.6:
+Hotfix gegenüber Version 0.7:
 
-- Kompakte Eingabeansicht für den normalen Workflow
-- Expertenmodus mit allen übrigen Parametern
-- Erweiterte Einstellungen als einklappbarer Bereich
-- Alle Parameter bleiben erhalten; die Berechnung bleibt unverändert
-- Kleine optische Verbesserungen im Ergebnisbereich
+- `app.py` ist jetzt robust, falls auf Streamlit Cloud noch eine ältere `defaults.py` liegt.
+- Der Import von `fields_for_group` wurde entfernt und als Fallback direkt in `app.py` integriert.
+- Kompakte Eingabeansicht und Expertenmodus bleiben erhalten.
+
+## Wichtig beim Upload
+
+Bitte im GitHub-Repository wirklich alle Dateien aus dem ZIP ersetzen, besonders:
+
+- `app.py`
+- `defaults.py`
+- `requirements.txt`
 
 ## Lokal starten
 
