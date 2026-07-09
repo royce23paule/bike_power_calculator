@@ -7,6 +7,7 @@ import numpy as np
 from math import pi,acos,sin,cos,atan2,nan,atan,exp,sqrt,fabs,copysign,isnan
 from scipy.ndimage import gaussian_filter1d
 import datetime
+import time
 import folium #conda install -c conda-forge folium
 import webbrowser
 from scipy import fftpack
@@ -372,6 +373,15 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     global Winddamping,Wetterdatei,Use_AdvWeather,API_Weather,API_StratTime
     global v_ave_liste,pol_a0_init,lat2,lon2
     #get_ipython().run_line_magic('matplotlib', 'inline')
+    _profile_steps = []
+    _profile_last = time.perf_counter()
+
+    def _profile_mark(name):
+        nonlocal _profile_last
+        _now = time.perf_counter()
+        _profile_steps.append({'Abschnitt': name, 'Zeit [s]': _now - _profile_last})
+        _profile_last = _now
+
     v_ave_liste=[]
     m_r = m_r_
     m_b = m_b_
@@ -414,20 +424,27 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     Wetterdatei=Wetterdatei_
     pol_a0_init=pol_a0
     Title_Page(Title,Anmerkungen)
+    _profile_mark('Titelseite erzeugen')
     plot_pre_sets(Speed_Soll)
+    _profile_mark('Preset-Tabelle erzeugen')
     lat2,lon2=import_gpx_or_fit_file()
+    _profile_mark('GPX/FIT einlesen')
     smooth_height_data()
+    _profile_mark('Höhenprofil glätten')
     if Use_GPX_Input:
         for i in range(len(power_max_liste)):
             power_max=power_max_liste[i]
             bike_power_calc(NP_Soll)
+            _profile_mark('Bike-Power-Kalkulation Optimierungslauf')
             print_statistics(i,True,False)
+            _profile_mark('Statistik Optimierungslauf')
         i=np.argmax(v_ave_liste)    
         power_max=power_max_liste[i]
     else:
         i=0
         power_max=pol_a0+(pol_a0-power_min)
     bike_power_calc(NP_Soll)
+    _profile_mark('Bike-Power-Kalkulation Hauptlauf')
     if not Use_GPX_Input and Speed_Soll>0:
         print('cdA entsprechend Soll Speed anpassen',Speed_Soll)
         n=len(pos)
@@ -440,14 +457,22 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
             residuum_Speed=(pos[n-1]/t_cumm[n-1]*3600)-Speed_Soll
             print('Ende Iteration mit Speed = ',pos[n-1]/t_cumm[n-1]*3600,' und f_cdA = ',f_cdA)
     print_maps()
+    _profile_mark('Karten erzeugen')
     print_statistics(i,False,True)
+    _profile_mark('Statistik erzeugen')
     time_in_power_zones()
+    _profile_mark('Power-Zonen erzeugen')
     plot_diagrams(sigma_filter,x_Achse,Histogram_Anz_Teilungen)
+    _profile_mark('Diagramme Strecke erzeugen')
     v_vs_P_var_grade()
+    _profile_mark('Diagramme Geschwindigkeit/Leistung erzeugen')
     v_vs_grade_var_P()
+    _profile_mark('Diagramme Geschwindigkeit/Steigung erzeugen')
     #time_in_power_zones()      
-    print_statistics(i,False,True) 
+    print_statistics(i,False,True)
+    _profile_mark('Statistik final erzeugen') 
     pdf_path = pdf_save([txt0,tab0,tab1,fig0,fig1,tab2,tab3,fig2,fig3,tab5,tab6,tab4,fig4,fig5,fig6,fig7,fig8,fig9,fig10,fig11,fig12,fig20,fig15,fig17,fig16,fig16b,fig13,fig14,fig18,fig19,fig21,fig22], Title+'.pdf')
+    _profile_mark('PDF schreiben')
     map_path = None
     try:
         map_path = GPX_File[0:GPX_File.rfind(".")] + '__GPS_Track.html'
@@ -460,6 +485,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'distance_km': pos[-1] if 'pos' in globals() and len(pos) > 0 else None,
         'duration_s': t_cumm[-1] if 't_cumm' in globals() and len(t_cumm) > 0 else None,
         'average_speed_kmh': (pos[-1] / t_cumm[-1] * 3600) if 'pos' in globals() and 't_cumm' in globals() and len(pos) > 0 and len(t_cumm) > 0 and t_cumm[-1] not in (0, None) else None,
+        'profile_steps': _profile_steps,
     }
     # Zusatzdaten für interaktive Streamlit/Plotly-Diagramme.
     # Die Berechnung selbst bleibt unverändert; hier werden nur bereits berechnete

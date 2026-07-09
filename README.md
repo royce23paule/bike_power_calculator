@@ -1,17 +1,13 @@
 # Bike Power Calculator – Streamlit
 
-## Version 1.2
+## Version 1.3
 
-Erster Schritt Richtung schnellere Berechnung:
+Profiler-Verfeinerung:
 
-- integrierter Laufzeit-Profiler
-- Messung von Gesamtzeit
-- Messung von Eingabeprüfung
-- Messung von Berechnung inklusive PDF/Karte
-- Messung der Ergebnisaufbereitung
-- Profiler-Tabelle im Ergebnisbereich
-
-Die Berechnung selbst wurde bewusst nicht verändert. Ziel ist zunächst, objektiv zu sehen, welche Abschnitte wirklich Zeit kosten.
+- Der bisher große Block „Berechnung / PDF / Karte erzeugen“ wird jetzt intern aufgeteilt.
+- Detailzeiten für GPX/FIT-Einlesen, Höhenprofil, Bike-Power-Kalkulation, Karten, Statistiken, Diagramme und PDF.
+- Die Berechnung bleibt unverändert.
+- Ziel: den echten Zeitfresser identifizieren, bevor optimiert wird.
 
 ## Lokal starten
 
