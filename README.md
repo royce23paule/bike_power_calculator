@@ -1,19 +1,17 @@
 # Bike Power Calculator – Streamlit
 
-## Version 1.5
+## Version 1.5.1
 
-Weitere Laufzeitoptimierung:
+Hotfix/Verbesserung gegenüber Version 1.5:
 
-- PDF-Erzeugung ist jetzt optional
-- HTML-Kartenerzeugung ist jetzt optional
-- Beide Optionen sind in der Sidebar unter „Ausgabe“
-- Standardmäßig bleiben PDF und HTML-Karte aktiviert
-- Für schnelle Tests kann die PDF ausgeschaltet werden
-
-## Erwarteter Effekt
-
-Im Profil der Challenge-Roth-Standardberechnung dauerte das PDF-Schreiben ca. 8 Sekunden.
-Wenn `PDF erzeugen` deaktiviert wird, entfällt dieser Block vollständig.
+- Ausgabeoptionen stehen jetzt direkt oberhalb von „Berechnung starten“
+- Checkboxen:
+  - PDF erzeugen
+  - HTML-Karte erzeugen
+- Ergebnis-Tabs werden dynamisch angezeigt:
+  - PDF-Tab nur, wenn PDF erzeugt wurde
+  - Karten-Tab nur, wenn HTML-Karte erzeugt wurde
+- Schnellmodus ist möglich: PDF und Karte aus, interaktive Diagramme bleiben erhalten
 
 ## Lokal starten
 

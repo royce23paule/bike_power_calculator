@@ -561,24 +561,31 @@ def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[st
         else:
             st.info("Keine HTML-Karte gefunden.")
 
-    result_tabs = st.tabs(["📈 Interaktive Diagramme", "📄 PDF", "🗺 Karte", "🧾 Berechnungslog"])
+    tab_labels = ["📈 Interaktive Diagramme"]
+    if pdf_path and pdf_path.exists():
+        tab_labels.append("📄 PDF")
+    if map_path and map_path.exists():
+        tab_labels.append("🗺 Karte")
+    tab_labels.append("🧾 Berechnungslog")
 
-    with result_tabs[0]:
+    result_tabs = st.tabs(tab_labels)
+
+    tab_index = 0
+    with result_tabs[tab_index]:
         render_interactive_charts(result)
+    tab_index += 1
 
-    with result_tabs[1]:
-        if pdf_path and pdf_path.exists():
+    if pdf_path and pdf_path.exists():
+        with result_tabs[tab_index]:
             pdf_viewer(pdf_path)
-        else:
-            st.warning("PDF-Vorschau nicht verfügbar.")
+        tab_index += 1
 
-    with result_tabs[2]:
-        if map_path and map_path.exists():
+    if map_path and map_path.exists():
+        with result_tabs[tab_index]:
             html_map_viewer(map_path)
-        else:
-            st.warning("Karte nicht verfügbar.")
+        tab_index += 1
 
-    with result_tabs[3]:
+    with result_tabs[tab_index]:
         if run_log:
             st.code(run_log)
         else:
@@ -593,7 +600,7 @@ def main() -> None:
     init_session_state()
 
     st.title("🚴 Bike Power Calculator")
-    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.5")
+    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.5.1")
 
     with st.sidebar:
         st.header("Einstellungen")
@@ -626,7 +633,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.success("Version 1.5: Version 1.5: optionale PDF-/Kartenerzeugung.")
+        st.success("Version 1.5.1: Version 1.5.1: Ausgabeoptionen direkt vor Berechnung.")
 
     config = st.session_state.config.copy()
 
@@ -666,13 +673,31 @@ def main() -> None:
 
     st.divider()
 
+    st.subheader("Ausgabe")
+    out_col1, out_col2 = st.columns(2)
+    with out_col1:
+        st.session_state.generate_pdf = st.checkbox(
+            "PDF erzeugen",
+            value=st.session_state.generate_pdf,
+            help="Ausschalten spart typischerweise mehrere Sekunden. Download und PDF-Vorschau entfallen dann.",
+        )
+    with out_col2:
+        st.session_state.generate_html_map = st.checkbox(
+            "HTML-Karte erzeugen",
+            value=st.session_state.generate_html_map,
+            help="Ausschalten spart etwas Zeit. Die interaktiven Diagramme bleiben erhalten.",
+        )
+
     run_col, info_col = st.columns([1, 2])
 
     with run_col:
         start_clicked = st.button("Berechnung starten", type="primary", use_container_width=True)
 
     with info_col:
-        st.info("Die Berechnung kann je nach Streckenlänge und Wettermodell etwas dauern. Danach erscheinen PDF, Karte und Log direkt unten.")
+        if st.session_state.generate_pdf or st.session_state.generate_html_map:
+            st.info("Die Berechnung erzeugt die ausgewählten Ausgaben. Für schnelle Tests kannst du PDF/Karte deaktivieren.")
+        else:
+            st.info("Schnellmodus aktiv: Es werden nur Berechnung und interaktive Diagramme erzeugt.")
 
     if start_clicked:
         if not st.session_state.config.get("GPX/FIT Datei"):
