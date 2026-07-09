@@ -36,3 +36,40 @@ def defaults_dict() -> dict[str, Any]:
 def ordered_values(config: dict[str, Any]) -> list[Any]:
     """Werte in alter Reihenfolge der Tkinter-App zurückgeben."""
     return [config.get(field["name"], field["default"]) for field in FIELDS]
+
+
+# Felder, die im normalen Workflow häufig gebraucht werden.
+# Alle übrigen Parameter bleiben vollständig erhalten und werden unter
+# "Erweiterte Einstellungen" angezeigt.
+BASIC_FIELD_INDICES: set[int] = {
+    0,   # Titel
+    1,   # FTP
+    2,   # Gewicht Fahrer
+    3,   # Gewicht Bike
+    4,   # Rollwiderstand
+    5,   # cdA flach
+    6,   # cdA Berg
+    11,  # NP Soll
+    12,  # Leistung bei 0 %
+    16,  # max. Leistung
+    17,  # Temperatur
+    18,  # Windgeschwindigkeit
+    19,  # Windrichtung
+    21,  # Advanced Weather
+    23,  # GPX/FIT
+    24,  # Höhengewinn
+    34,  # Anmerkungen
+}
+
+
+def is_basic_field(field: dict[str, Any]) -> bool:
+    return int(field["index"]) in BASIC_FIELD_INDICES
+
+
+def fields_for_group(group_key: str, basic_only: bool | None = None) -> list[dict[str, Any]]:
+    fields = [field for field in FIELDS if field["group"] == group_key]
+    if basic_only is True:
+        return [field for field in fields if is_basic_field(field)]
+    if basic_only is False:
+        return [field for field in fields if not is_basic_field(field)]
+    return fields
