@@ -1,1 +1,3 @@
-# bike_power_calculator
+# Bike Power Calculator
+
+Erste Streamlit-Grundversion.

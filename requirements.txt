@@ -1,0 +1,13 @@
+streamlit
+pandas
+numpy
+matplotlib
+scipy
+fitparse
+gpxpy
+folium
+bokeh
+openmeteo-requests
+requests-cache
+retry-requests
+Pillow
