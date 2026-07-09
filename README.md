@@ -1,13 +1,21 @@
 # Bike Power Calculator – Streamlit
 
-## Version 1.3
+## Version 1.4
 
-Profiler-Verfeinerung:
+Erste echte Laufzeitoptimierung:
 
-- Der bisher große Block „Berechnung / PDF / Karte erzeugen“ wird jetzt intern aufgeteilt.
-- Detailzeiten für GPX/FIT-Einlesen, Höhenprofil, Bike-Power-Kalkulation, Karten, Statistiken, Diagramme und PDF.
-- Die Berechnung bleibt unverändert.
-- Ziel: den echten Zeitfresser identifizieren, bevor optimiert wird.
+- Wenn `max. Leistung (Liste( [W]` nur einen einzigen Wert enthält, wird der bisher redundante Optimierungslauf übersprungen.
+- Der Hauptlauf bleibt unverändert und erzeugt weiterhin die finalen Ergebnisse.
+- Bei mehreren Maximalleistungswerten bleibt das bisherige Such-/Optimierungsverhalten unverändert.
+- Erwartete Beschleunigung beim aktuellen Challenge-Roth-Default: ca. 8 Sekunden weniger.
+
+## Hintergrund
+
+Im Profil aus Version 1.3 waren zwei vollständige Bike-Power-Läufe sichtbar:
+- Optimierungslauf ca. 8.3 s
+- Hauptlauf ca. 8.4 s
+
+Bei nur einem Wert in der Leistungsliste gibt es nichts zu optimieren. Deshalb kann der erste Lauf ohne Ergebnisänderung entfallen.
 
 ## Lokal starten
 

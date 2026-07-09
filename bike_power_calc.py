@@ -432,14 +432,22 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     smooth_height_data()
     _profile_mark('Höhenprofil glätten')
     if Use_GPX_Input:
-        for i in range(len(power_max_liste)):
+        if len(power_max_liste) == 1:
+            # Optimierung überspringen: Bei nur einem Maximalleistungswert gibt es
+            # nichts auszuwählen. Der folgende Hauptlauf liefert exakt die finalen
+            # Ergebnisse und vermeidet einen vollständigen redundanten Rechenlauf.
+            i = 0
+            power_max = power_max_liste[0]
+            _profile_mark('Optimierungslauf übersprungen')
+        else:
+            for i in range(len(power_max_liste)):
+                power_max=power_max_liste[i]
+                bike_power_calc(NP_Soll)
+                _profile_mark('Bike-Power-Kalkulation Optimierungslauf')
+                print_statistics(i,True,False)
+                _profile_mark('Statistik Optimierungslauf')
+            i=np.argmax(v_ave_liste)    
             power_max=power_max_liste[i]
-            bike_power_calc(NP_Soll)
-            _profile_mark('Bike-Power-Kalkulation Optimierungslauf')
-            print_statistics(i,True,False)
-            _profile_mark('Statistik Optimierungslauf')
-        i=np.argmax(v_ave_liste)    
-        power_max=power_max_liste[i]
     else:
         i=0
         power_max=pol_a0+(pol_a0-power_min)

@@ -587,7 +587,7 @@ def main() -> None:
     init_session_state()
 
     st.title("🚴 Bike Power Calculator")
-    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.3")
+    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.4")
 
     with st.sidebar:
         st.header("Einstellungen")
@@ -620,7 +620,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.success("Version 1.3: Version 1.3: Detail-Profiler im Rechenkern.")
+        st.success("Version 1.4: Version 1.4: schneller bei einzelner max. Leistung.")
 
     config = st.session_state.config.copy()
 
