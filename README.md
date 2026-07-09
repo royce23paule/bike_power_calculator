@@ -1,15 +1,17 @@
 # Bike Power Calculator – Streamlit
 
-## Version 1.1.2
+## Version 1.2
 
-Hotfix für interaktive Diagramme:
+Erster Schritt Richtung schnellere Berechnung:
 
-- Leistung nutzt jetzt den korrekten internen Verlauf `power`
-- CdA nutzt jetzt `cdA_List`
-- Luftdichte wird neu als `rho_List` gespeichert und geplottet
-- Effektiver Wind wird neu als `v_w_List` gespeichert und geplottet
-- Geschwindigkeitsverlauf wird nicht mehr fälschlich erneut mit 3.6 multipliziert
-- Rohdaten-Tabelle enthält jetzt die korrekten Spaltennamen
+- integrierter Laufzeit-Profiler
+- Messung von Gesamtzeit
+- Messung von Eingabeprüfung
+- Messung von Berechnung inklusive PDF/Karte
+- Messung der Ergebnisaufbereitung
+- Profiler-Tabelle im Ergebnisbereich
+
+Die Berechnung selbst wurde bewusst nicht verändert. Ziel ist zunächst, objektiv zu sehen, welche Abschnitte wirklich Zeit kosten.
 
 ## Lokal starten
 

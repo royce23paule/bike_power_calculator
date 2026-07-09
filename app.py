@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import tempfile
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -71,6 +72,8 @@ def init_session_state() -> None:
         st.session_state.result = None
     if "run_log" not in st.session_state:
         st.session_state.run_log = ""
+    if "profile" not in st.session_state:
+        st.session_state.profile = None
     if "last_loaded_json_name" not in st.session_state:
         st.session_state.last_loaded_json_name = None
 
@@ -404,6 +407,33 @@ def render_interactive_charts(result: dict[str, Any]) -> None:
         data = {k: v[:max_len] if isinstance(v, list) else v for k, v in data.items()}
         st.dataframe(pd.DataFrame(data), use_container_width=True)
 
+
+def format_seconds(value: float | None) -> str:
+    if value is None:
+        return "—"
+    return f"{value:.2f} s"
+
+
+def render_profile(profile: dict[str, float] | None) -> None:
+    if not profile:
+        return
+
+    st.subheader("Laufzeit-Profil")
+    cols = st.columns(4)
+    cols[0].metric("Gesamt", format_seconds(profile.get("total_s")))
+    cols[1].metric("Berechnung", format_seconds(profile.get("calculation_s")))
+    cols[2].metric("Ergebnisaufbereitung", format_seconds(profile.get("postprocess_s")))
+    cols[3].metric("Sonstiges", format_seconds(profile.get("other_s")))
+
+    with st.expander("Profiler-Details"):
+        rows = [
+            {"Abschnitt": "Eingaben prüfen", "Zeit [s]": profile.get("validation_s", 0.0)},
+            {"Abschnitt": "Berechnung / PDF / Karte erzeugen", "Zeit [s]": profile.get("calculation_s", 0.0)},
+            {"Abschnitt": "Ergebnis in Session speichern", "Zeit [s]": profile.get("postprocess_s", 0.0)},
+            {"Abschnitt": "Gesamt", "Zeit [s]": profile.get("total_s", 0.0)},
+        ]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
 # ---------------------------------------------------------------------------
 # Result rendering
 # ---------------------------------------------------------------------------
@@ -466,9 +496,11 @@ def html_map_viewer(map_path: Path, height: int = 650) -> None:
         st.components.v1.html(map_path.read_text(encoding="latin-1"), height=height)
 
 
-def render_results(result: dict[str, Any] | None, run_log: str) -> None:
+def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[str, float] | None = None) -> None:
     if not result:
         return
+
+    render_profile(profile)
 
     st.subheader("Ergebnisse")
 
@@ -546,7 +578,7 @@ def main() -> None:
     init_session_state()
 
     st.title("🚴 Bike Power Calculator")
-    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.1.2")
+    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.2")
 
     with st.sidebar:
         st.header("Einstellungen")
@@ -579,7 +611,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.success("Version 1.1.2: Version 1.1.2: interaktive Plotly-Diagramme.")
+        st.success("Version 1.2: Version 1.2: integrierter Laufzeit-Profiler.")
 
     config = st.session_state.config.copy()
 
@@ -632,29 +664,48 @@ def main() -> None:
             st.error("Bitte zuerst eine GPX- oder FIT-Datei hochladen.")
         else:
             log_buffer = io.StringIO()
+            profile: dict[str, float] = {}
+            t_total_start = time.perf_counter()
             progress = st.progress(0, text="Berechnung wird vorbereitet …")
             try:
                 with st.spinner("Berechnung läuft …"):
+                    t_validation_start = time.perf_counter()
                     progress.progress(10, text="Eingaben werden geprüft …")
                     run_config = st.session_state.config.copy()
                     run_config["GPX/FIT Datei"] = resolve_repository_path(str(run_config.get("GPX/FIT Datei", "")))
                     run_config["Wetterdatei Advanced Weather"] = resolve_repository_path(str(run_config.get("Wetterdatei Advanced Weather", "")))
+                    profile["validation_s"] = time.perf_counter() - t_validation_start
+
                     with contextlib.redirect_stdout(log_buffer):
-                        progress.progress(25, text="Strecke und Wetter werden verarbeitet …")
+                        progress.progress(25, text="Strecke, Wetter, PDF und Karte werden berechnet …")
+                        t_calc_start = time.perf_counter()
                         result = call_bike_power_calc(run_config)
+                        profile["calculation_s"] = time.perf_counter() - t_calc_start
+
+                    t_post_start = time.perf_counter()
                     progress.progress(100, text="Berechnung abgeschlossen.")
-                st.session_state.result = result
-                st.session_state.run_log = log_buffer.getvalue()
+                    st.session_state.result = result
+                    st.session_state.run_log = log_buffer.getvalue()
+                    profile["postprocess_s"] = time.perf_counter() - t_post_start
+
+                profile["total_s"] = time.perf_counter() - t_total_start
+                profile["other_s"] = max(
+                    0.0,
+                    profile["total_s"] - profile.get("validation_s", 0.0) - profile.get("calculation_s", 0.0) - profile.get("postprocess_s", 0.0),
+                )
+                st.session_state.profile = profile
                 st.success("Berechnung abgeschlossen.")
             except Exception as exc:
                 progress.empty()
+                profile["total_s"] = time.perf_counter() - t_total_start
+                st.session_state.profile = profile
                 st.session_state.result = None
                 st.session_state.run_log = log_buffer.getvalue() + "\n\nTRACEBACK:\n" + traceback.format_exc()
                 st.error(f"Berechnung abgebrochen: {exc}")
                 with st.expander("Berechnungslog anzeigen", expanded=True):
                     st.code(st.session_state.run_log)
 
-    render_results(st.session_state.result, st.session_state.run_log)
+    render_results(st.session_state.result, st.session_state.run_log, st.session_state.profile)
 
     with st.expander("Aktuelle Konfiguration anzeigen"):
         st.json(st.session_state.config)
