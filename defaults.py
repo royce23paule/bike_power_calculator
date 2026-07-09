@@ -37,7 +37,7 @@ def load_repository_default_input() -> dict[str, Any]:
     import json
     from pathlib import Path
 
-    path = Path(__file__).with_name("Default_INPUT.json")
+    path = Path(__file__).parent / "data" / "Default_INPUT.json"
     if not path.exists():
         return {field["name"]: field["default"] for field in FIELDS}
 

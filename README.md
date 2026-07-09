@@ -1,16 +1,8 @@
 # Bike Power Calculator – Streamlit
 
-## Version 0.9
+## Version 1.0
 
-Änderungen gegenüber Version 0.8:
-
-- Standard-GPX liegt jetzt sauber unter `data/Challange_Roth_Bike_2025.gpx`
-- `Default_INPUT.json` verweist auf diesen relativen Repository-Pfad
-- Die App löst relative Pfade automatisch auf
-- Beim ersten Start ist die Challenge-Roth-Strecke direkt aktiv
-- Ein Benutzer kann sofort auf „Berechnung starten“ klicken, ohne eine GPX-Datei hochzuladen
-
-## Repository-Struktur
+Aufgeräumte Repository-Struktur:
 
 ```text
 BikePowerCalculator/
@@ -20,10 +12,26 @@ BikePowerCalculator/
 ├── open_meteostat.py
 ├── requirements.txt
 ├── README.md
-├── Default_INPUT.json
 └── data/
+    ├── Default_INPUT.json
     └── Challange_Roth_Bike_2025.gpx
 ```
+
+## Wichtig
+
+Die Standardwerte liegen jetzt in:
+
+```text
+data/Default_INPUT.json
+```
+
+Die Standard-GPX liegt in:
+
+```text
+data/Challange_Roth_Bike_2025.gpx
+```
+
+Die App lädt beide automatisch. Ein Benutzer kann nach dem Start direkt auf **Berechnung starten** klicken.
 
 ## Lokal starten
 
@@ -31,3 +39,8 @@ BikePowerCalculator/
 pip install -r requirements.txt
 streamlit run app.py
 ```
+
+## Streamlit Community Cloud
+
+Bei GitHub alle Dateien und den kompletten `data`-Ordner hochladen.
+Als Main file bleibt `app.py`.
