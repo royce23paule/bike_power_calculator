@@ -1,23 +1,15 @@
-# Bike Power Calculator – Streamlit
-
-## Version 0.8
-
-Änderungen:
-
-- Neue Defaultwerte aus `Challange_Roth.json`
-- `Default_INPUT.json` ist jetzt die zentrale Default-Konfiguration im Repository
-- Challenge-Roth-GPX liegt standardmäßig unter `examples/Challange_Roth_Bike_2025.gpx`
-- Relative Repository-Pfade werden in Streamlit automatisch korrekt aufgelöst
-- Layout bleibt wie in Version 0.6 / 0.7.2
-
-## Lokal starten
-
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-## Dateien
-
-- `Default_INPUT.json`: neue Standardwerte
-- `examples/Challange_Roth_Bike_2025.gpx`: Standardstrecke
+streamlit
+pandas
+numpy
+matplotlib
+scipy
+fitparse
+gpxpy
+folium
+bokeh
+openmeteo-requests
+requests-cache
+retry-requests
+Pillow
+meteostat
+pymupdf
