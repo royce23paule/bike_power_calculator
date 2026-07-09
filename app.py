@@ -13,21 +13,6 @@ import streamlit as st
 import bike_power_calc as bpc
 from defaults import FIELDS, GROUP_TITLES, defaults_dict, ordered_values
 
-# Fallback, falls in Streamlit Cloud versehentlich noch eine ältere defaults.py liegt.
-BASIC_FIELD_INDICES: set[int] = {
-    0, 1, 2, 3, 4, 5, 6, 11, 12, 16, 17, 18, 19, 21, 23, 24, 34
-}
-
-
-def fields_for_group(group_key: str, basic_only: bool | None = None) -> list[dict[str, Any]]:
-    group_fields = [field for field in FIELDS if field["group"] == group_key]
-    if basic_only is None:
-        return group_fields
-    if basic_only:
-        return [field for field in group_fields if int(field["index"]) in BASIC_FIELD_INDICES]
-    return [field for field in group_fields if int(field["index"]) not in BASIC_FIELD_INDICES]
-
-
 
 st.set_page_config(
     page_title="Bike Power Calculator",
@@ -140,84 +125,11 @@ def render_field(field: dict[str, Any], config: dict[str, Any]) -> Any:
     return st.text_input(name, help=help_text, key=key)
 
 
-def render_group_fields(fields: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
+def render_group(group_key: str, config: dict[str, Any]) -> dict[str, Any]:
     result = {}
-    for field in fields:
+    group_fields = [field for field in FIELDS if field["group"] == group_key]
+    for field in group_fields:
         result[field["name"]] = render_field(field, config)
-    return result
-
-
-def render_compact_inputs(config: dict[str, Any]) -> dict[str, Any]:
-    """Kompakte Oberfläche für den normalen Workflow."""
-    result = {}
-
-    st.subheader("Basisparameter")
-    st.caption("Die wichtigsten Eingaben für eine schnelle Berechnung. Alle weiteren Optionen bleiben unten im Expertenbereich verfügbar.")
-
-    basis_cols = st.columns(3)
-    basis_map = {
-        0: basis_cols[0],
-        1: basis_cols[1],
-        11: basis_cols[2],
-        2: basis_cols[0],
-        3: basis_cols[1],
-        4: basis_cols[2],
-    }
-    for field in FIELDS:
-        if field["index"] in basis_map:
-            with basis_map[field["index"]]:
-                result[field["name"]] = render_field(field, config)
-
-    st.subheader("Aerodynamik & Leistung")
-    aero_cols = st.columns(3)
-    aero_map = {
-        5: aero_cols[0],
-        6: aero_cols[1],
-        12: aero_cols[2],
-        16: aero_cols[2],
-    }
-    for field in FIELDS:
-        if field["index"] in aero_map:
-            with aero_map[field["index"]]:
-                result[field["name"]] = render_field(field, config)
-
-    st.subheader("Wetter & Strecke")
-    route_cols = st.columns(3)
-    route_map = {
-        17: route_cols[0],
-        18: route_cols[1],
-        19: route_cols[2],
-        21: route_cols[0],
-        23: route_cols[1],
-        24: route_cols[2],
-    }
-    for field in FIELDS:
-        if field["index"] in route_map:
-            with route_map[field["index"]]:
-                result[field["name"]] = render_field(field, config)
-
-    st.subheader("Notizen")
-    for field in FIELDS:
-        if field["index"] == 34:
-            result[field["name"]] = render_field(field, config)
-
-    return result
-
-
-def render_expert_inputs(config: dict[str, Any]) -> dict[str, Any]:
-    """Alle selten benötigten Parameter, weiterhin vollständig editierbar."""
-    result = {}
-    tab_keys = ["basis", "aero", "leistung", "wetter", "strecke", "ausgabe"]
-    tabs = st.tabs([GROUP_TITLES[key] for key in tab_keys])
-
-    for tab, group_key in zip(tabs, tab_keys):
-        with tab:
-            expert_fields = fields_for_group(group_key, basic_only=False)
-            if not expert_fields:
-                st.info("Keine zusätzlichen Expertenparameter in diesem Bereich.")
-            else:
-                result.update(render_group_fields(expert_fields, config))
-
     return result
 
 
@@ -484,16 +396,7 @@ def main() -> None:
     init_session_state()
 
     st.title("🚴 Bike Power Calculator")
-    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 0.7.1")
-    st.markdown(
-        """
-        <style>
-        .stMetric { border: 1px solid rgba(49, 51, 63, 0.15); border-radius: 0.75rem; padding: 0.75rem; }
-        div[data-testid="stExpander"] { border-radius: 0.75rem; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 0.7.2")
 
     with st.sidebar:
         st.header("Einstellungen")
@@ -526,7 +429,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.success("Version 0.7.1: Import-Fix + kompakte Oberfläche.")
+        st.success("Version 0.7.2: Version 0.7.2: Layout wie v0.6 + Hotfixes.")
 
     config = st.session_state.config.copy()
 
@@ -547,32 +450,20 @@ def main() -> None:
             config["Wetterdatei Advanced Weather"] = weather_path
             st.success(f"Wetterdatei geladen: {weather_file.name}")
 
+    tab_keys = ["basis", "aero", "leistung", "wetter", "strecke", "ausgabe"]
+    tabs = st.tabs([GROUP_TITLES[key] for key in tab_keys])
+
     updated = {}
-
-    input_mode = st.radio(
-        "Eingabeansicht",
-        ["Kompakt", "Experte"],
-        horizontal=True,
-        help="Kompakt zeigt die wichtigsten Felder. Experte zeigt alle übrigen Parameter.",
-    )
-
-    if input_mode == "Kompakt":
-        updated.update(render_compact_inputs(config))
-        with st.expander("⚙ Erweiterte Einstellungen", expanded=False):
-            updated.update(render_expert_inputs(config))
-    else:
-        st.subheader("Alle Einstellungen")
-        updated.update(render_group_fields(FIELDS, config))
+    for tab, group_key in zip(tabs, tab_keys):
+        with tab:
+            updated.update(render_group(group_key, config))
 
     if route_path:
         updated["GPX/FIT Datei"] = route_path
     if weather_path:
         updated["Wetterdatei Advanced Weather"] = weather_path
 
-    # Felder, die in der gewählten Ansicht nicht gerendert wurden, behalten ihren bisherigen Wert.
-    merged_config = config.copy()
-    merged_config.update(updated)
-    st.session_state.config = normalize_loaded_config(merged_config)
+    st.session_state.config = normalize_loaded_config(updated)
 
     st.divider()
 
