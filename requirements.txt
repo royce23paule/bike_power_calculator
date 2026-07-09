@@ -13,4 +13,4 @@ retry-requests
 Pillow
 meteostat
 pymupdf
-plotly
+plotly==5.24.1

@@ -465,8 +465,8 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     # Die Berechnung selbst bleibt unverändert; hier werden nur bereits berechnete
     # globale Arrays eingesammelt, falls sie im jeweiligen Lauf existieren.
     for _name in [
-        'pos', 't_cumm', 'h', 'h_raw', 'grade', 'grade_raw', 'P', 'Power', 'Power_fit',
-        'v', 'v_b', 'v_w', 'v_w_eff', 'rho', 'cdA', 'direction',
+        'pos', 't_cumm', 'h', 'h_raw', 'grade', 'grade_raw', 'power', 'Power_fit',
+        'v', 'v_w_List', 'rho_List', 'cdA_List', 'P_r_rel', 'P_g_rel', 'P_l_rel', 'P_ges', 'P_Save', 'direction',
         'AdvWeather_TempC', 'AdvWeather_AirSpeed', 'AdvWeather_AirDir',
         'AdvWeather_AirMoisture', 'AdvWeather_AirPressure',
         'AdvWeather_ApparentT', 'AdvWeather_WindGusts', 'AdvWeather_Precipitation'
@@ -1018,7 +1018,7 @@ def smooth_height_data():
         plt.close()        
         
 def bike_power_main_calc(Power_fit_Input):
-    global t,power,tP4,t_cumm,grade,v,P_r_rel,P_g_rel,P_l_rel,NP,AP,P_ges,P_Save,cdA_List
+    global t,power,tP4,t_cumm,grade,v,P_r_rel,P_g_rel,P_l_rel,NP,AP,P_ges,P_Save,cdA_List,rho_List,v_w_List
     #Berechnungen durchführen
     grade = [nan]
     power = [nan]
@@ -1032,7 +1032,9 @@ def bike_power_main_calc(Power_fit_Input):
     P_l_rel =[nan]      
     P_ges = [nan]
     P_Save =[nan] 
-    cdA_List=[nan] 
+    cdA_List=[nan]
+    rho_List=[nan]
+    v_w_List=[nan]
     for i in range(1,len(pos)):     
         grade_tmp=h[i]-h[i-1]
         if grade_tmp!=0:
@@ -1071,7 +1073,9 @@ def bike_power_main_calc(Power_fit_Input):
         P_g_rel.append(P_g/P_ges_tmp*100) 
         P_l_rel.append(P_l/P_ges_tmp*100) 
         P_ges.append(P_ges_tmp)
-        P_Save.append(P_Save_tmp) 
+        P_Save.append(P_Save_tmp)
+        rho_List.append(rho)
+        v_w_List.append(v_w*3.6)
         n=len(t)
         NP=(np.sum(tP4[1:n])/np.sum(t[1:n]))**0.25
         AP=(np.sum(tP[1:n])/np.sum(t[1:n]))

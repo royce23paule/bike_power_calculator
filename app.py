@@ -327,7 +327,7 @@ def render_interactive_charts(result: dict[str, Any]) -> None:
     st.plotly_chart(fig1, use_container_width=True)
 
     fig2 = go.Figure()
-    add_line(fig2, result, x, "Leistung [W]", "P", "Power")
+    add_line(fig2, result, x, "Leistung [W]", "power")
     add_line(fig2, result, x, "FIT-Leistung [W]", "Power_fit")
     fig2.update_layout(
         title="Leistung",
@@ -336,11 +336,14 @@ def render_interactive_charts(result: dict[str, Any]) -> None:
         hovermode="x unified",
         legend_title="Kurven",
     )
-    st.plotly_chart(fig2, use_container_width=True)
+    if fig2.data:
+        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.info("Keine Leistungsdaten gefunden.")
 
     fig3 = go.Figure()
-    add_line(fig3, result, x, "Geschwindigkeit [km/h]", "v", "v_b", scale=3.6)
-    add_line(fig3, result, x, "Wind effektiv [km/h]", "v_w_eff", "v_w")
+    add_line(fig3, result, x, "Geschwindigkeit [km/h]", "v")
+    add_line(fig3, result, x, "Wind effektiv [km/h]", "v_w_List")
     fig3.update_layout(
         title="Geschwindigkeit und Wind",
         xaxis_title=x_label,
@@ -351,8 +354,8 @@ def render_interactive_charts(result: dict[str, Any]) -> None:
     st.plotly_chart(fig3, use_container_width=True)
 
     fig4 = go.Figure()
-    add_line(fig4, result, x, "CdA [m²]", "cdA")
-    add_line(fig4, result, x, "Luftdichte [kg/m³]", "rho")
+    add_line(fig4, result, x, "CdA [m²]", "cdA_List")
+    add_line(fig4, result, x, "Luftdichte [kg/m³]", "rho_List")
     fig4.update_layout(
         title="Aerodynamik und Luftdichte",
         xaxis_title=x_label,
@@ -360,7 +363,10 @@ def render_interactive_charts(result: dict[str, Any]) -> None:
         hovermode="x unified",
         legend_title="Kurven",
     )
-    st.plotly_chart(fig4, use_container_width=True)
+    if fig4.data:
+        st.plotly_chart(fig4, use_container_width=True)
+    else:
+        st.info("Keine CdA-/Luftdichte-Daten gefunden.")
 
     weather_available = any(result.get(name) for name in [
         "AdvWeather_TempC", "AdvWeather_AirSpeed", "AdvWeather_AirDir",
@@ -385,8 +391,9 @@ def render_interactive_charts(result: dict[str, Any]) -> None:
     with st.expander("Interaktive Rohdaten anzeigen"):
         data = {"x": x}
         for key in [
-            "h", "h_raw", "grade", "P", "Power", "Power_fit", "v", "v_b",
-            "v_w", "v_w_eff", "rho", "cdA", "AdvWeather_TempC", "AdvWeather_AirSpeed",
+            "h", "h_raw", "grade", "power", "Power_fit", "v", "v_w_List",
+            "rho_List", "cdA_List", "P_r_rel", "P_g_rel", "P_l_rel", "P_ges", "P_Save",
+            "AdvWeather_TempC", "AdvWeather_AirSpeed",
             "AdvWeather_AirDir", "AdvWeather_AirMoisture", "AdvWeather_AirPressure",
         ]:
             series = result.get(key)
@@ -539,7 +546,7 @@ def main() -> None:
     init_session_state()
 
     st.title("🚴 Bike Power Calculator")
-    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.1")
+    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.1.2")
 
     with st.sidebar:
         st.header("Einstellungen")
@@ -572,7 +579,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.success("Version 1.1: Version 1.1: interaktive Plotly-Diagramme.")
+        st.success("Version 1.1.2: Version 1.1.2: interaktive Plotly-Diagramme.")
 
     config = st.session_state.config.copy()
 

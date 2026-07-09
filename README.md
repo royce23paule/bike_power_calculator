@@ -1,16 +1,15 @@
 # Bike Power Calculator – Streamlit
 
-## Version 1.1
+## Version 1.1.2
 
-Neue Funktion:
+Hotfix für interaktive Diagramme:
 
-- Interaktive Plotly-Diagramme zusätzlich zur PDF
-- Zoomen, Werte per Hover ablesen, Kurven ein-/ausblenden
-- Diagramme für Höhenprofil/Steigung, Leistung, Geschwindigkeit/Wind, Aerodynamik/Luftdichte
-- Advanced-Weather-Diagramm, falls Wetterdaten im Lauf vorhanden sind
-- Rohdaten-Tabelle für die interaktiven Diagramme
-
-Die bestehende Berechnung bleibt unverändert.
+- Leistung nutzt jetzt den korrekten internen Verlauf `power`
+- CdA nutzt jetzt `cdA_List`
+- Luftdichte wird neu als `rho_List` gespeichert und geplottet
+- Effektiver Wind wird neu als `v_w_List` gespeichert und geplottet
+- Geschwindigkeitsverlauf wird nicht mehr fälschlich erneut mit 3.6 multipliziert
+- Rohdaten-Tabelle enthält jetzt die korrekten Spaltennamen
 
 ## Lokal starten
 
