@@ -535,6 +535,18 @@ def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[st
                 st.bar_chart(df_steps.set_index("Abschnitt")["Zeit [s]"])
             st.dataframe(df_steps, use_container_width=True, hide_index=True)
 
+    detailed_steps = result.get("detailed_profile_steps")
+    if isinstance(detailed_steps, list) and detailed_steps:
+        with st.expander("Feinprofil bike_power_main_calc()", expanded=True):
+            df_detail = pd.DataFrame(detailed_steps)
+            if "Zeit [s]" in df_detail.columns:
+                df_detail["Zeit [s]"] = df_detail["Zeit [s]"].astype(float)
+                df_sum = df_detail.groupby("Abschnitt", as_index=False)["Zeit [s]"].sum()
+                st.bar_chart(df_sum.set_index("Abschnitt")["Zeit [s]"])
+                st.dataframe(df_sum, use_container_width=True, hide_index=True)
+            else:
+                st.dataframe(df_detail, use_container_width=True, hide_index=True)
+
     download_cols = st.columns(2)
 
     with download_cols[0]:
@@ -600,7 +612,7 @@ def main() -> None:
     init_session_state()
 
     st.title("🚴 Bike Power Calculator")
-    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.5.1")
+    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.6")
 
     with st.sidebar:
         st.header("Einstellungen")
@@ -633,7 +645,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.success("Version 1.5.1: Version 1.5.1: Ausgabeoptionen direkt vor Berechnung.")
+        st.success("Version 1.6: Version 1.6: Feinprofilierung im Rechenkern.")
 
     config = st.session_state.config.copy()
 

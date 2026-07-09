@@ -374,6 +374,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     global v_ave_liste,pol_a0_init,lat2,lon2
     #get_ipython().run_line_magic('matplotlib', 'inline')
     _profile_steps = []
+    _detailed_profile_steps = []
     _profile_last = time.perf_counter()
 
     def _profile_mark(name):
@@ -498,6 +499,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'duration_s': t_cumm[-1] if 't_cumm' in globals() and len(t_cumm) > 0 else None,
         'average_speed_kmh': (pos[-1] / t_cumm[-1] * 3600) if 'pos' in globals() and 't_cumm' in globals() and len(pos) > 0 and len(t_cumm) > 0 and t_cumm[-1] not in (0, None) else None,
         'profile_steps': _profile_steps,
+        'detailed_profile_steps': _detailed_profile_steps,
     }
     # Zusatzdaten für interaktive Streamlit/Plotly-Diagramme.
     # Die Berechnung selbst bleibt unverändert; hier werden nur bereits berechnete
@@ -1058,6 +1060,7 @@ def smooth_height_data():
         
 def bike_power_main_calc(Power_fit_Input):
     global t,power,tP4,t_cumm,grade,v,P_r_rel,P_g_rel,P_l_rel,NP,AP,P_ges,P_Save,cdA_List,rho_List,v_w_List
+    global _detailed_profile_steps
     #Berechnungen durchführen
     grade = [nan]
     power = [nan]
@@ -1074,7 +1077,18 @@ def bike_power_main_calc(Power_fit_Input):
     cdA_List=[nan]
     rho_List=[nan]
     v_w_List=[nan]
+
+    _bp_start_total = time.perf_counter()
+    _bp_counts = {
+        'grade_power': 0.0,
+        'calc_v': 0.0,
+        'power_components': 0.0,
+        'append_store': 0.0,
+        'np_ap_update': 0.0,
+    }
+
     for i in range(1,len(pos)):     
+        _t0 = time.perf_counter()
         grade_tmp=h[i]-h[i-1]
         if grade_tmp!=0:
             grade_tmp=grade_tmp/((pos[i]-pos[i-1])*1000)*100    
@@ -1086,7 +1100,11 @@ def bike_power_main_calc(Power_fit_Input):
         power_tmp=min(max(power_tmp,power_min),power_max)    
         if not Use_GPX_Input: power_tmp=Power_fit_Input[i]
         h_mean=0.5*(h[i]+h[i-1])
+        _bp_counts['grade_power'] += time.perf_counter() - _t0
+        _t0 = time.perf_counter()
         v_b = calc_v(power_tmp,grade_tmp,h_mean,direction[i],dir_w,v_w0,False) #/m/s
+        _bp_counts['calc_v'] += time.perf_counter() - _t0
+        _t0 = time.perf_counter()
         t_tmp = ((pos[i]-pos[i-1])*1000) / v_b
         t_cumm.append(t_cumm[i-1]+t_tmp) 
         #vmean_cumm = pos[i] / (t_cumm[i]/3600)
@@ -1101,6 +1119,8 @@ def bike_power_main_calc(Power_fit_Input):
             P_Save_tmp = (cdA_Hill - cdA) * (100/eta * 0.5 * rho * (v_b + v_w)**2 * v_b)
         else:
             P_Save_tmp = (cdA_Flat - cdA) * (100/eta * 0.5 * rho * (v_b + v_w)**2 * v_b)
+        _bp_counts['power_components'] += time.perf_counter() - _t0
+        _t0 = time.perf_counter()
         #übrige Arrays erstellen
         grade.append(grade_tmp)
         power.append(power_tmp)
@@ -1115,9 +1135,24 @@ def bike_power_main_calc(Power_fit_Input):
         P_Save.append(P_Save_tmp)
         rho_List.append(rho)
         v_w_List.append(v_w*3.6)
+        _bp_counts['append_store'] += time.perf_counter() - _t0
+        _t0 = time.perf_counter()
         n=len(t)
         NP=(np.sum(tP4[1:n])/np.sum(t[1:n]))**0.25
         AP=(np.sum(tP[1:n])/np.sum(t[1:n]))
+        _bp_counts['np_ap_update'] += time.perf_counter() - _t0
+
+    _bp_total = time.perf_counter() - _bp_start_total
+    try:
+        _detailed_profile_steps.append({'Abschnitt': 'bike_power_main_calc: gesamt', 'Zeit [s]': _bp_total})
+        for _key, _label in [
+            ('grade_power', 'bike_power_main_calc: Steigung/Leistungsinput'),
+            ('calc_v', 'bike_power_main_calc: calc_v inkl. Wetter/CdA'),
+            ('power_components', 'bike_power_main_calc: Leistungsanteile'),
+            ('append_store', 'bike_power_main_calc: Listen/Speichern'),
+            ('np_ap_update', 'bike_power_main_calc: NP/AP laufend aktualisieren'),
+        ]:
+            _detailed_profile_steps.append({'Abschnitt': _label, 'Zeit [s]': _bp_counts.get(_key, 0.0)})
 
 def bike_power_calc(NP_Soll):
     if Use_GPX_Input:

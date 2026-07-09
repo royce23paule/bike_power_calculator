@@ -1,17 +1,18 @@
 # Bike Power Calculator – Streamlit
 
-## Version 1.5.1
+## Version 1.6
 
-Hotfix/Verbesserung gegenüber Version 1.5:
+Feinprofilierung des Rechenkerns:
 
-- Ausgabeoptionen stehen jetzt direkt oberhalb von „Berechnung starten“
-- Checkboxen:
-  - PDF erzeugen
-  - HTML-Karte erzeugen
-- Ergebnis-Tabs werden dynamisch angezeigt:
-  - PDF-Tab nur, wenn PDF erzeugt wurde
-  - Karten-Tab nur, wenn HTML-Karte erzeugt wurde
-- Schnellmodus ist möglich: PDF und Karte aus, interaktive Diagramme bleiben erhalten
+- `bike_power_main_calc()` wird intern weiter aufgeteilt
+- gemessen werden:
+  - Steigung/Leistungsinput
+  - `calc_v()` inkl. Wetter/CdA/Geschwindigkeitslösung
+  - Leistungsanteile
+  - Listen/Speichern
+  - laufende NP/AP-Aktualisierung
+- Die Berechnung selbst bleibt unverändert.
+- Ziel: präzise sehen, wo der Hauptlauf Zeit verliert, bevor wir optimieren.
 
 ## Lokal starten
 
