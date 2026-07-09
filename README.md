@@ -1,17 +1,16 @@
 # Bike Power Calculator – Streamlit
 
-## Version 1.1.1
+## Version 1.1
 
-Hotfix gegenüber Version 1.1:
+Neue Funktion:
 
-- `plotly` wird in `requirements.txt` auf `plotly==5.24.1` gepinnt.
-- Sonst unverändert zu Version 1.1.
-- Gedacht als Fix für Installationsprobleme auf Streamlit Community Cloud.
+- Interaktive Plotly-Diagramme zusätzlich zur PDF
+- Zoomen, Werte per Hover ablesen, Kurven ein-/ausblenden
+- Diagramme für Höhenprofil/Steigung, Leistung, Geschwindigkeit/Wind, Aerodynamik/Luftdichte
+- Advanced-Weather-Diagramm, falls Wetterdaten im Lauf vorhanden sind
+- Rohdaten-Tabelle für die interaktiven Diagramme
 
-## Falls Streamlit Cloud trotzdem meckert
-
-In Streamlit Cloud unter **Manage app → Logs** die genaue Fehlermeldung ansehen.
-Wichtig ist die Zeile direkt über `ERROR: Could not install packages...`.
+Die bestehende Berechnung bleibt unverändert.
 
 ## Lokal starten
 
