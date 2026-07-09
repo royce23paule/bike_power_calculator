@@ -3,8 +3,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
-import os
 import tempfile
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,10 @@ st.set_page_config(
 )
 
 
+def widget_key(field: dict[str, Any]) -> str:
+    return f"input_{field['key']}"
+
+
 def normalize_loaded_config(raw: dict[str, Any]) -> dict[str, Any]:
     config = defaults_dict()
     for field in FIELDS:
@@ -31,6 +35,34 @@ def normalize_loaded_config(raw: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
+def sync_widgets_from_config(config: dict[str, Any]) -> None:
+    """Wichtig: bereits existierende Streamlit-Widgets behalten sonst alte Werte.
+
+    Beim Laden einer JSON-Datei müssen daher nicht nur st.session_state.config,
+    sondern auch die Widget-Keys selbst aktualisiert werden.
+    """
+    for field in FIELDS:
+        key = widget_key(field)
+        value = config.get(field["name"], field["default"])
+
+        if field["type"] == "bool":
+            value = str(value).lower() == "true" if isinstance(value, str) else bool(value)
+        elif field["type"] == "int":
+            try:
+                value = int(value)
+            except Exception:
+                value = int(field["default"])
+        elif field["type"] == "float":
+            try:
+                value = float(value)
+            except Exception:
+                value = float(field["default"])
+        else:
+            value = str(value)
+
+        st.session_state[key] = value
+
+
 def init_session_state() -> None:
     if "config" not in st.session_state:
         st.session_state.config = defaults_dict()
@@ -38,6 +70,8 @@ def init_session_state() -> None:
         st.session_state.result = None
     if "run_log" not in st.session_state:
         st.session_state.run_log = ""
+    if "last_loaded_json_name" not in st.session_state:
+        st.session_state.last_loaded_json_name = None
 
 
 def save_uploaded_file(uploaded_file) -> str | None:
@@ -56,27 +90,32 @@ def render_field(field: dict[str, Any], config: dict[str, Any]) -> Any:
     name = field["name"]
     value = config.get(name, field["default"])
     help_text = field.get("help") or None
-    key = f"input_{field['key']}"
+    key = widget_key(field)
 
     if field["type"] == "bool":
-        bool_value = str(value).lower() == "true" if isinstance(value, str) else bool(value)
-        return st.checkbox(name, value=bool_value, help=help_text, key=key)
+        if key not in st.session_state:
+            st.session_state[key] = str(value).lower() == "true" if isinstance(value, str) else bool(value)
+        return st.checkbox(name, help=help_text, key=key)
 
     if field["type"] == "int":
-        try:
-            int_value = int(value)
-        except Exception:
-            int_value = int(field["default"])
-        return st.number_input(name, value=int_value, step=1, help=help_text, key=key)
+        if key not in st.session_state:
+            try:
+                st.session_state[key] = int(value)
+            except Exception:
+                st.session_state[key] = int(field["default"])
+        return st.number_input(name, step=1, help=help_text, key=key)
 
     if field["type"] == "float":
-        try:
-            float_value = float(value)
-        except Exception:
-            float_value = float(field["default"])
-        return st.number_input(name, value=float_value, help=help_text, key=key, format="%.6g")
+        if key not in st.session_state:
+            try:
+                st.session_state[key] = float(value)
+            except Exception:
+                st.session_state[key] = float(field["default"])
+        return st.number_input(name, help=help_text, key=key, format="%.6g")
 
-    return st.text_input(name, value=str(value), help=help_text, key=key)
+    if key not in st.session_state:
+        st.session_state[key] = str(value)
+    return st.text_input(name, help=help_text, key=key)
 
 
 def render_group(group_key: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -96,7 +135,6 @@ def bool_from_value(value: Any) -> bool:
 
 
 def call_bike_power_calc(config: dict[str, Any]) -> dict[str, Any]:
-    """Übergibt die Streamlit-Konfiguration an die unveränderte Run-Signatur."""
     values = ordered_values(config)
 
     title = str(values[0])
@@ -106,7 +144,6 @@ def call_bike_power_calc(config: dict[str, Any]) -> dict[str, Any]:
     cr_dyn = 0
     cr = float(values[4])
 
-    # Parsing wie in der alten Tkinter-Funktion run_bpc()
     import re
 
     cda_list = [float(s) for s in re.findall(r"-?\d+\.?\d*", str(values[5]))]
@@ -157,10 +194,16 @@ def call_bike_power_calc(config: dict[str, Any]) -> dict[str, Any]:
     sigma_filter = float(values[28])
     moving_ave_filter = int(values[29])
     Histogram_Anz_Teilungen = int(values[30])
-    Open_HTML_Map = False  # In Streamlit nie automatisch Browserfenster öffnen.
+    Open_HTML_Map = False
     Show_km_Markers = float(values[32])
-    Show_Plots_in_Run = False  # In Streamlit/PDF-Modus stabiler.
+    Show_Plots_in_Run = False
     Anmerkungen = str(values[34])
+
+    if not Path(GPX_File).exists():
+        raise FileNotFoundError(f"GPX/FIT-Datei nicht gefunden: {GPX_File}")
+
+    if Use_AdvWeather and not API_Weather and not Path(Wetterdatei).exists():
+        raise FileNotFoundError(f"Wetter-CSV nicht gefunden: {Wetterdatei}")
 
     return bpc.Run(
         title,
@@ -259,7 +302,7 @@ def main() -> None:
     init_session_state()
 
     st.title("🚴 Bike Power Calculator")
-    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 0.3")
+    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 0.4")
 
     with st.sidebar:
         st.header("Einstellungen")
@@ -271,12 +314,17 @@ def main() -> None:
         )
 
         if uploaded_json is not None:
-            try:
-                raw_config = json.load(uploaded_json)
-                st.session_state.config = normalize_loaded_config(raw_config)
-                st.success("JSON-Einstellungen geladen.")
-            except Exception as exc:
-                st.error(f"JSON konnte nicht geladen werden: {exc}")
+            if uploaded_json.name != st.session_state.last_loaded_json_name:
+                try:
+                    raw_config = json.load(uploaded_json)
+                    loaded_config = normalize_loaded_config(raw_config)
+                    st.session_state.config = loaded_config
+                    sync_widgets_from_config(loaded_config)
+                    st.session_state.last_loaded_json_name = uploaded_json.name
+                    st.success("JSON-Einstellungen geladen und übernommen.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"JSON konnte nicht geladen werden: {exc}")
 
         st.download_button(
             "Aktuelle Einstellungen herunterladen",
@@ -286,7 +334,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.success("Version 0.3: Berechnung angebunden.")
+        st.success("Version 0.4: JSON-Laden korrigiert, Fehlerlog erweitert.")
 
     config = st.session_state.config.copy()
 
@@ -337,9 +385,10 @@ def main() -> None:
                 st.session_state.run_log = log_buffer.getvalue()
                 st.success("Berechnung abgeschlossen.")
             except Exception as exc:
-                st.session_state.run_log = log_buffer.getvalue()
+                st.session_state.result = None
+                st.session_state.run_log = log_buffer.getvalue() + "\n\nTRACEBACK:\n" + traceback.format_exc()
                 st.error(f"Berechnung abgebrochen: {exc}")
-                with st.expander("Berechnungslog anzeigen"):
+                with st.expander("Berechnungslog anzeigen", expanded=True):
                     st.code(st.session_state.run_log)
 
     render_results(st.session_state.result, st.session_state.run_log)

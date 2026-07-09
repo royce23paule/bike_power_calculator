@@ -213,6 +213,8 @@ def interpolate_CSV_Weather_data(time):
             
     
 def lin_interpolate(x,x0,x1,y0,y1):
+    if x1 == x0:
+        return y0
     y=y0+(y1-y0)/(x1-x0)*(x-x0)
     return y
  
@@ -316,7 +318,11 @@ def moving_ave2(array1,array2,n):
     for i in range(imax):
         i1=max(0,i-nbefore)
         i2=min(i+nafter,imax-1)
-        val=(array1[i2]-array1[i1])/(array2[i2]-array2[i1])
+        denom = (array2[i2]-array2[i1])
+        if denom == 0:
+            val = 0
+        else:
+            val=(array1[i2]-array1[i1])/denom
         array_ave.append(val)
     return array_ave
 
@@ -453,7 +459,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'title': Title,
         'distance_km': pos[-1] if 'pos' in globals() and len(pos) > 0 else None,
         'duration_s': t_cumm[-1] if 't_cumm' in globals() and len(t_cumm) > 0 else None,
-        'average_speed_kmh': (pos[-1] / t_cumm[-1] * 3600) if 'pos' in globals() and 't_cumm' in globals() and len(pos) > 0 and len(t_cumm) > 0 and t_cumm[-1] else None,
+        'average_speed_kmh': (pos[-1] / t_cumm[-1] * 3600) if 'pos' in globals() and 't_cumm' in globals() and len(pos) > 0 and len(t_cumm) > 0 and t_cumm[-1] not in (0, None) else None,
     }
     
 def Title_Page(Title,Anmerkungen):
@@ -900,6 +906,8 @@ def import_gpx_file():
     
 def liear_interpolate_between(x,y):
     n=len(x)-1
+    if n <= 0 or x[n] == x[0]:
+        return 0, list(y)
     gradient=(y[n]-y[0])/((x[n]-x[0]))
     y_new=[y[0]]
     for i in range(1,n+1):
