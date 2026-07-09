@@ -74,6 +74,10 @@ def init_session_state() -> None:
         st.session_state.run_log = ""
     if "profile" not in st.session_state:
         st.session_state.profile = None
+    if "generate_pdf" not in st.session_state:
+        st.session_state.generate_pdf = True
+    if "generate_html_map" not in st.session_state:
+        st.session_state.generate_html_map = True
     if "last_loaded_json_name" not in st.session_state:
         st.session_state.last_loaded_json_name = None
 
@@ -163,7 +167,7 @@ def bool_from_value(value: Any) -> bool:
     return str(value).lower() == "true" if isinstance(value, str) else bool(value)
 
 
-def call_bike_power_calc(config: dict[str, Any]) -> dict[str, Any]:
+def call_bike_power_calc(config: dict[str, Any], generate_pdf: bool = True, generate_html_map: bool = True) -> dict[str, Any]:
     values = ordered_values(config)
 
     title = str(values[0])
@@ -276,6 +280,8 @@ def call_bike_power_calc(config: dict[str, Any]) -> dict[str, Any]:
         Speed_Soll,
         Start_Distance,
         End_Distance,
+        generate_pdf,
+        generate_html_map,
     )
 
 
@@ -587,7 +593,7 @@ def main() -> None:
     init_session_state()
 
     st.title("🚴 Bike Power Calculator")
-    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.4")
+    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.5")
 
     with st.sidebar:
         st.header("Einstellungen")
@@ -620,7 +626,7 @@ def main() -> None:
         )
 
         st.divider()
-        st.success("Version 1.4: Version 1.4: schneller bei einzelner max. Leistung.")
+        st.success("Version 1.5: Version 1.5: optionale PDF-/Kartenerzeugung.")
 
     config = st.session_state.config.copy()
 
@@ -688,7 +694,7 @@ def main() -> None:
                     with contextlib.redirect_stdout(log_buffer):
                         progress.progress(25, text="Strecke, Wetter, PDF und Karte werden berechnet …")
                         t_calc_start = time.perf_counter()
-                        result = call_bike_power_calc(run_config)
+                        result = call_bike_power_calc(run_config, st.session_state.generate_pdf, st.session_state.generate_html_map)
                         profile["calculation_s"] = time.perf_counter() - t_calc_start
 
                     t_post_start = time.perf_counter()

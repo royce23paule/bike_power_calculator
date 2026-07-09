@@ -363,7 +363,7 @@ def Find_Index_Close(a,v): #Find the position p, where the value v has the close
     return p
     
 #-----------------------------------------------------------------------------------------------------------------------------------------
-def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,eta_,cr_dyn_,cr_,cdA_Hill_,FTP_,power_max_liste_,NP_Soll_,pol_a0_,pol_grade_max_,power_min_,pol_grade_min_,dir_w_,v_w0_,T_Luft_,GPX_File_,Hoehengewinn_Soll_,Steigung_max_min_,sigma_filter_,x_Achse_,Histogram_Anz_Teilungen_,Gaus_Filter_,moving_ave_filter_,Open_HTML_Map_,Show_km_Markers_,Show_Plots_in_Run_,Use_AdvWeather_,API_Weather_,API_StratTime_,Wetterdatei_,Winddamping_,Anmerkungen,Speed_Soll,Start_Distance_,End_Distance_):
+def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,eta_,cr_dyn_,cr_,cdA_Hill_,FTP_,power_max_liste_,NP_Soll_,pol_a0_,pol_grade_max_,power_min_,pol_grade_min_,dir_w_,v_w0_,T_Luft_,GPX_File_,Hoehengewinn_Soll_,Steigung_max_min_,sigma_filter_,x_Achse_,Histogram_Anz_Teilungen_,Gaus_Filter_,moving_ave_filter_,Open_HTML_Map_,Show_km_Markers_,Show_Plots_in_Run_,Use_AdvWeather_,API_Weather_,API_StratTime_,Wetterdatei_,Winddamping_,Anmerkungen,Speed_Soll,Start_Distance_,End_Distance_,Generate_PDF=True,Generate_HTML_Map=True):
     global power_max,m_sys,m_r,m_b
     global cdA_Hill_Grade,cdA_Flat,Draft_Save_Grade,Draft_Save,eta,cr_dyn,cr,cdA_Hill,FTP
     global power_max_liste,NP_Soll,pol_a0,pol_grade_max,power_min,pol_grade_min
@@ -464,7 +464,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
             bike_power_calc(0)
             residuum_Speed=(pos[n-1]/t_cumm[n-1]*3600)-Speed_Soll
             print('Ende Iteration mit Speed = ',pos[n-1]/t_cumm[n-1]*3600,' und f_cdA = ',f_cdA)
-    print_maps()
+    print_maps(Generate_HTML_Map)
     _profile_mark('Karten erzeugen')
     print_statistics(i,False,True)
     _profile_mark('Statistik erzeugen')
@@ -479,11 +479,15 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     #time_in_power_zones()      
     print_statistics(i,False,True)
     _profile_mark('Statistik final erzeugen') 
-    pdf_path = pdf_save([txt0,tab0,tab1,fig0,fig1,tab2,tab3,fig2,fig3,tab5,tab6,tab4,fig4,fig5,fig6,fig7,fig8,fig9,fig10,fig11,fig12,fig20,fig15,fig17,fig16,fig16b,fig13,fig14,fig18,fig19,fig21,fig22], Title+'.pdf')
-    _profile_mark('PDF schreiben')
+    pdf_path = None
+    if Generate_PDF:
+        pdf_path = pdf_save([txt0,tab0,tab1,fig0,fig1,tab2,tab3,fig2,fig3,tab5,tab6,tab4,fig4,fig5,fig6,fig7,fig8,fig9,fig10,fig11,fig12,fig20,fig15,fig17,fig16,fig16b,fig13,fig14,fig18,fig19,fig21,fig22], Title+'.pdf')
+        _profile_mark('PDF schreiben')
+    else:
+        _profile_mark('PDF übersprungen')
     map_path = None
     try:
-        map_path = GPX_File[0:GPX_File.rfind(".")] + '__GPS_Track.html'
+        map_path = GPX_File[0:GPX_File.rfind(".")] + '__GPS_Track.html' if Generate_HTML_Map else None
     except Exception:
         map_path = None
     result = {
@@ -742,7 +746,7 @@ def v_vs_grade_var_P():
         plt.close()
         plt.close()        
 
-def print_maps():
+def print_maps(Generate_HTML_Map=True):
     global fig0
     #Karte plotten    
     fig0, ax = plt.subplots()
@@ -793,25 +797,26 @@ def print_maps():
     else:
         plt.close()     
     
-    #Karte plotten 2 
-    lat_lon=[]
-    for i in range(len(lat2)):
-        lat_lon.append(tuple([lat2[i], lon2[i]]))
-    mymap = folium.Map( location=[np.mean(lat2), np.mean(lon2)], zoom_start=14)
-    folium.PolyLine(lat_lon, color="red", weight=3.5, opacity=1).add_to(mymap)
-    if Show_km_Markers>0:
-        folium.Marker(location=[lat2[0],lon2[0]],icon=folium.DivIcon(html=f"""<div style="font-size:20pt;font-weight: bold;">{0}</div>""")).add_to(mymap)
-        folium.Marker(location=[lat2[0],lon2[0]]).add_to(mymap)
-        km_value=Show_km_Markers
-        for i in range(len(pos)):
-            if pos[i]-km_value>0:
-                folium.Marker(location=[lat2[i],lon2[i]],icon=folium.DivIcon(html=f"""<div style="font-size:20pt;font-weight: bold;">{round(pos[i],1)}</div>""")).add_to(mymap)
-                folium.Marker(location=[lat2[i],lon2[i]]).add_to(mymap)
-                km_value+=Show_km_Markers
-    Map_Name=GPX_File[0:GPX_File.rfind(".")] + '__GPS_Track.html'
-    mymap.save(Map_Name)
-    if Open_HTML_Map:
-        print('HTML map saved to %s' % Map_Name)
+    #Karte plotten 2 / HTML-Karte optional erzeugen
+    if Generate_HTML_Map:
+        lat_lon=[]
+        for i in range(len(lat2)):
+            lat_lon.append(tuple([lat2[i], lon2[i]]))
+        mymap = folium.Map( location=[np.mean(lat2), np.mean(lon2)], zoom_start=14)
+        folium.PolyLine(lat_lon, color="red", weight=3.5, opacity=1).add_to(mymap)
+        if Show_km_Markers>0:
+            folium.Marker(location=[lat2[0],lon2[0]],icon=folium.DivIcon(html=f"""<div style="font-size:20pt;font-weight: bold;">{0}</div>""")).add_to(mymap)
+            folium.Marker(location=[lat2[0],lon2[0]]).add_to(mymap)
+            km_value=Show_km_Markers
+            for i in range(len(pos)):
+                if pos[i]-km_value>0:
+                    folium.Marker(location=[lat2[i],lon2[i]],icon=folium.DivIcon(html=f"""<div style="font-size:20pt;font-weight: bold;">{round(pos[i],1)}</div>""")).add_to(mymap)
+                    folium.Marker(location=[lat2[i],lon2[i]]).add_to(mymap)
+                    km_value+=Show_km_Markers
+        Map_Name=GPX_File[0:GPX_File.rfind(".")] + '__GPS_Track.html'
+        mymap.save(Map_Name)
+        if Open_HTML_Map:
+            print('HTML map saved to %s' % Map_Name)
 
 def import_gpx_or_fit_file():
     global Use_GPX_Input
