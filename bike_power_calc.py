@@ -1,9 +1,11 @@
 from fitparse import FitFile #conda install -c conda-forge python-fitparse 
 import gpxpy #conda install -c conda-forge gpxpy 
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from math import pi,acos,sin,cos,atan2,nan,atan,exp,sqrt,fabs,copysign,isnan
-from scipy.ndimage.filters import gaussian_filter1d
+from scipy.ndimage import gaussian_filter1d
 import datetime
 import folium #conda install -c conda-forge folium
 import webbrowser
@@ -244,14 +246,14 @@ def AdvWeather_roh(p,T,phi):
     return rho
 
 def pdf_save(fig_list, file_name, path_name='./'):
-    pp=PdfPages(path_name+file_name)
+    output_path = os.path.join(path_name, file_name)
+    pp = PdfPages(output_path)
     for fig in fig_list:
-        if fig!=0:
-            pp.savefig(figure=fig,bbox_inches='tight',orientation='landscape')
+        if fig != 0:
+            pp.savefig(figure=fig, bbox_inches='tight', orientation='landscape')
     pp.close()
-    print('PDF saved to %s' % path_name+file_name)
-    os.startfile(file_name)
-    return
+    print('PDF saved to %s' % output_path)
+    return output_path
 
 def dir_from_lat_lon(lat0,lat1,lon0,lon1):
         arg1=cos(lat0*deg2rad)*sin(lat1*deg2rad)-sin(lat0*deg2rad)*cos(lat1*deg2rad)*cos(lon1*deg2rad-lon0*deg2rad)
@@ -439,7 +441,20 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     v_vs_grade_var_P()
     #time_in_power_zones()      
     print_statistics(i,False,True) 
-    pdf_save([txt0,tab0,tab1,fig0,fig1,tab2,tab3,fig2,fig3,tab5,tab6,tab4,fig4,fig5,fig6,fig7,fig8,fig9,fig10,fig11,fig12,fig20,fig15,fig17,fig16,fig16b,fig13,fig14,fig18,fig19,fig21,fig22], Title+'.pdf')
+    pdf_path = pdf_save([txt0,tab0,tab1,fig0,fig1,tab2,tab3,fig2,fig3,tab5,tab6,tab4,fig4,fig5,fig6,fig7,fig8,fig9,fig10,fig11,fig12,fig20,fig15,fig17,fig16,fig16b,fig13,fig14,fig18,fig19,fig21,fig22], Title+'.pdf')
+    map_path = None
+    try:
+        map_path = GPX_File[0:GPX_File.rfind(".")] + '__GPS_Track.html'
+    except Exception:
+        map_path = None
+    return {
+        'pdf_path': pdf_path,
+        'map_path': map_path,
+        'title': Title,
+        'distance_km': pos[-1] if 'pos' in globals() and len(pos) > 0 else None,
+        'duration_s': t_cumm[-1] if 't_cumm' in globals() and len(t_cumm) > 0 else None,
+        'average_speed_kmh': (pos[-1] / t_cumm[-1] * 3600) if 'pos' in globals() and 't_cumm' in globals() and len(pos) > 0 and len(t_cumm) > 0 and t_cumm[-1] else None,
+    }
     
 def Title_Page(Title,Anmerkungen):
     global txt0
@@ -737,7 +752,7 @@ def print_maps():
     Map_Name=GPX_File[0:GPX_File.rfind(".")] + '__GPS_Track.html'
     mymap.save(Map_Name)
     if Open_HTML_Map:
-        webbrowser.open(Map_Name)
+        print('HTML map saved to %s' % Map_Name)
 
 def import_gpx_or_fit_file():
     global Use_GPX_Input

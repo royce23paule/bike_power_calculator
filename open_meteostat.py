@@ -1,9 +1,10 @@
 import datetime
 import numpy as np
 from fitparse import FitFile
-import tkinter as tk
 import gpxpy
 from meteostat import Point, Hourly, Daily #pip install meteostat
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 

@@ -2,20 +2,19 @@
 
 Streamlit-Migration der bestehenden lokalen Bike-Power-Calculator-App.
 
-## Stand
+## Stand Version 0.3
 
-Version 0.2 enthält:
+Diese Version enthält:
 
 - vollständige Streamlit-Oberfläche mit allen Parametern der bisherigen Tkinter-App
 - Tabs für Fahrer/Rad, Aerodynamik, Leistung, Wetter, Strecke und Ausgabe
-- Tooltips aus der bestehenden Desktop-App
 - Upload für GPX/FIT
 - Upload für Wetter-CSV
-- JSON-Einstellungen laden
-- JSON-Einstellungen herunterladen
-- unveränderte Reihenfolge aller Parameter für die spätere Übergabe an die bestehende Berechnungslogik
-
-Die eigentliche Berechnung wird in Version 0.3 angebunden.
+- JSON-Einstellungen laden und speichern
+- Anbindung an die bestehende Berechnungslogik
+- PDF-Download nach der Berechnung
+- HTML-Karten-Download und Kartenanzeige in Streamlit
+- Cloud-sichere Anpassung von `os.startfile()` und `webbrowser.open()`
 
 ## Lokal starten
 
