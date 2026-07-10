@@ -1,19 +1,13 @@
-# Bike Power Calculator – Streamlit
+# Bike Power Calculator – Version 2.0
 
-## Version 1.7
+Diese stabile Refactoring-Version basiert vollständig auf der funktionierenden Version 1.5.1.
 
-Strukturelles Refactoring ohne Änderung der Berechnung.
-
-Neue Dateistruktur:
+## Struktur
 
 ```text
 BikePowerCalculator/
-├── app.py
-├── ui.py
-├── calc_adapter.py
-├── plots.py
-├── profiling.py
-├── exports.py
+├── app.py          # schlanker Streamlit-Einstieg
+├── app_main.py     # bestehende, stabile Streamlit-Oberfläche
 ├── bike_power_calc.py
 ├── defaults.py
 ├── open_meteostat.py
@@ -24,14 +18,13 @@ BikePowerCalculator/
     └── Challange_Roth_Bike_2025.gpx
 ```
 
-Ziel:
+## Sicherheit
 
-- `app.py` ist deutlich schlanker
-- UI, Plotly-Diagramme, Profiler und Downloads liegen in eigenen Modulen
-- Berechnung bleibt unverändert
-- weitere Optimierungen am Rechenkern werden dadurch sicherer und leichter
+- `bike_power_calc.py` wurde aus Version 1.5.1 unverändert übernommen.
+- Die Streamlit-Logik wurde nicht funktional verändert.
+- Alle Python-Dateien wurden vor dem Verpacken mit `py_compile` geprüft.
 
-## Lokal starten
+## Start
 
 ```bash
 pip install -r requirements.txt
