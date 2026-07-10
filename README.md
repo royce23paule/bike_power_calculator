@@ -1,18 +1,35 @@
 # Bike Power Calculator – Streamlit
 
-## Version 1.6
+## Version 1.7
 
-Feinprofilierung des Rechenkerns:
+Strukturelles Refactoring ohne Änderung der Berechnung.
 
-- `bike_power_main_calc()` wird intern weiter aufgeteilt
-- gemessen werden:
-  - Steigung/Leistungsinput
-  - `calc_v()` inkl. Wetter/CdA/Geschwindigkeitslösung
-  - Leistungsanteile
-  - Listen/Speichern
-  - laufende NP/AP-Aktualisierung
-- Die Berechnung selbst bleibt unverändert.
-- Ziel: präzise sehen, wo der Hauptlauf Zeit verliert, bevor wir optimieren.
+Neue Dateistruktur:
+
+```text
+BikePowerCalculator/
+├── app.py
+├── ui.py
+├── calc_adapter.py
+├── plots.py
+├── profiling.py
+├── exports.py
+├── bike_power_calc.py
+├── defaults.py
+├── open_meteostat.py
+├── requirements.txt
+├── README.md
+└── data/
+    ├── Default_INPUT.json
+    └── Challange_Roth_Bike_2025.gpx
+```
+
+Ziel:
+
+- `app.py` ist deutlich schlanker
+- UI, Plotly-Diagramme, Profiler und Downloads liegen in eigenen Modulen
+- Berechnung bleibt unverändert
+- weitere Optimierungen am Rechenkern werden dadurch sicherer und leichter
 
 ## Lokal starten
 
