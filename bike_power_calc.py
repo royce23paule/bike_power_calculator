@@ -39,6 +39,64 @@ g = 9.81
 deg2rad = pi/180
 #v_ave_liste=[]
 
+
+# Persistenter Open-Meteo-Cache. Identische Abfragen derselben Strecke und
+# Startzeit werden bei Folgeberechnungen ohne Netzwerkzugriff beantwortet.
+_WEATHER_CACHE_EXPIRE_SECONDS = 30 * 24 * 60 * 60
+_weather_cache_session = None
+_openmeteo_client = None
+API_Cache_Hits = 0
+API_Cache_Misses = 0
+API_Request_Count = 0
+
+
+def _get_weather_cache_session():
+    global _weather_cache_session
+    if _weather_cache_session is None:
+        cache_dir = Path(__file__).parent / '.weather_cache'
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_name = cache_dir / 'openmeteo'
+        _weather_cache_session = requests_cache.CachedSession(
+            str(cache_name),
+            expire_after=_WEATHER_CACHE_EXPIRE_SECONDS,
+            stale_if_error=True,
+        )
+    return _weather_cache_session
+
+
+def _get_openmeteo_client():
+    global _openmeteo_client
+    if _openmeteo_client is None:
+        retry_session = retry(_get_weather_cache_session(), retries=5, backoff_factor=0.2)
+        _openmeteo_client = openmeteo_requests.Client(session=retry_session)
+    return _openmeteo_client
+
+
+def clear_weather_api_cache():
+    """Löscht den persistenten Open-Meteo-Cache für einen bewussten Neuabruf."""
+    global API_Cache_Hits, API_Cache_Misses, API_Request_Count
+    session = _get_weather_cache_session()
+    session.cache.clear()
+    API_Cache_Hits = 0
+    API_Cache_Misses = 0
+    API_Request_Count = 0
+
+
+def get_weather_api_cache_info():
+    """Diagnosewerte des Wetter-Caches für den Entwicklermodus."""
+    session = _get_weather_cache_session()
+    try:
+        entries = len(session.cache.responses)
+    except Exception:
+        entries = None
+    return {
+        'entries': entries,
+        'hits': API_Cache_Hits,
+        'misses': API_Cache_Misses,
+        'requests': API_Request_Count,
+        'expire_days': _WEATHER_CACHE_EXPIRE_SECONDS / 86400,
+    }
+
 def calc_rho_advanced(time):
     global time_new_Weather,AdvWeather_TempC,AdvWeather_AirSpeed,AdvWeather_AirDir,AdvWeather_AirMoisture,AdvWeather_AirPressure,AdvWeather_AirDensity,AdvWeather_ApparentT,AdvWeather_WindGusts,AdvWeather_Precipitation
     if time[-1]==0:
@@ -78,12 +136,15 @@ def calc_rho_advanced(time):
 # #    print(API_Data)
 
 def Get_API_Data(latitude,longitude,StratTime):
-    global hourly_data
-    # print('START Get_API_Data')
-    # Setup the Open-Meteo API client with cache and retry on error
-    cache_session = requests_cache.CachedSession('.cache', expire_after = 1)
-    retry_session = retry(cache_session, retries = 5, backoff_factor = 0.2)
-    openmeteo = openmeteo_requests.Client(session = retry_session)
+    global hourly_data, API_Cache_Hits, API_Cache_Misses, API_Request_Count
+    # Ein Client und ein persistenter Cache werden für alle Abfragen wiederverwendet.
+    cache_session = _get_weather_cache_session()
+    openmeteo = _get_openmeteo_client()
+    API_Request_Count += 1
+    try:
+        cache_entries_before = len(cache_session.cache.responses)
+    except Exception:
+        cache_entries_before = None
     
     # Make sure all required weather variables are listed here
     # The order of variables in hourly or daily is important to assign them correctly below
@@ -105,6 +166,14 @@ def Get_API_Data(latitude,longitude,StratTime):
     	"end_date": str(API_Time)     
     }
     responses = openmeteo.weather_api(url, params=params)
+    try:
+        cache_entries_after = len(cache_session.cache.responses)
+        if cache_entries_before is not None and cache_entries_after > cache_entries_before:
+            API_Cache_Misses += 1
+        else:
+            API_Cache_Hits += 1
+    except Exception:
+        pass
     
     # Process first location. Add a for-loop for multiple locations or weather models
     response = responses[0]
@@ -372,6 +441,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     global sigma_filter,x_Achse,Histogram_Anz_Teilungen,Gaus_Filter,moving_ave_filter,Open_HTML_Map,Show_km_Markers,Show_Plots_in_Run
     global Winddamping,Wetterdatei,Use_AdvWeather,API_Weather,API_StratTime
     global v_ave_liste,pol_a0_init,lat2,lon2
+    global API_Cache_Hits, API_Cache_Misses, API_Request_Count
     #get_ipython().run_line_magic('matplotlib', 'inline')
     _profile_steps = []
     _profile_last = time.perf_counter()
@@ -383,6 +453,9 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         _profile_last = _now
 
     v_ave_liste=[]
+    API_Cache_Hits = 0
+    API_Cache_Misses = 0
+    API_Request_Count = 0
     m_r = m_r_
     m_b = m_b_
     m_sys = m_r_ + m_b_
@@ -497,6 +570,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'distance_km': pos[-1] if 'pos' in globals() and len(pos) > 0 else None,
         'duration_s': t_cumm[-1] if 't_cumm' in globals() and len(t_cumm) > 0 else None,
         'average_speed_kmh': (pos[-1] / t_cumm[-1] * 3600) if 'pos' in globals() and 't_cumm' in globals() and len(pos) > 0 and len(t_cumm) > 0 and t_cumm[-1] not in (0, None) else None,
+        'weather_api_cache': get_weather_api_cache_info() if API_Weather else None,
         'profile_steps': _profile_steps,
     }
     # Zusatzdaten für interaktive Streamlit/Plotly-Diagramme.

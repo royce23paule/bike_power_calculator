@@ -27,18 +27,19 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-APP_VERSION = "2.1"
+APP_VERSION = "2.2"
 BUILD_DATE = "2026-07-10"
-ENGINE_VERSION = "1.5.1"
+ENGINE_VERSION = "1.5.1-cache"
 
 CHANGELOG = {
     "Neu": [
-        "Umschaltbarer Entwicklermodus",
+        "Persistenter Cache für Open-Meteo-API-Abfragen",
+        "Manueller Neuabruf der Online-Wetterdaten",
         "System- und Ergebnisdiagnose",
         "Projektinformationen und Changelog in der App",
     ],
     "Verbessert": [
-        "Laufzeitprofile sind im Normalmodus ausgeblendet",
+        "Wiederholungsberechnungen mit identischer Strecke/Startzeit nutzen lokale Wetterdaten",
     ],
     "Behoben": [],
 }
@@ -101,6 +102,8 @@ def init_session_state() -> None:
         st.session_state.last_loaded_json_name = None
     if "developer_mode" not in st.session_state:
         st.session_state.developer_mode = False
+    if "refresh_weather_cache" not in st.session_state:
+        st.session_state.refresh_weather_cache = False
 
 
 def config_to_json_bytes(config: dict[str, Any]) -> bytes:
@@ -785,6 +788,19 @@ def main() -> None:
             help="Ausschalten spart etwas Zeit. Die interaktiven Diagramme bleiben erhalten.",
         )
 
+    weather_mode = str(st.session_state.config.get("Verwendung Advanced Weather", ""))
+    if weather_mode.startswith("True,True"):
+        st.session_state.refresh_weather_cache = st.checkbox(
+            "Online-Wetter neu laden",
+            value=False,
+            help=(
+                "Löscht vor dieser Berechnung den lokalen Open-Meteo-Cache. "
+                "Ohne Haken werden identische Abfragen bis zu 30 Tage wiederverwendet."
+            ),
+        )
+    else:
+        st.session_state.refresh_weather_cache = False
+
     run_col, info_col = st.columns([1, 2])
 
     with run_col:
@@ -816,6 +832,8 @@ def main() -> None:
                     with contextlib.redirect_stdout(log_buffer):
                         progress.progress(25, text="Strecke, Wetter, PDF und Karte werden berechnet …")
                         t_calc_start = time.perf_counter()
+                        if st.session_state.refresh_weather_cache:
+                            bpc.clear_weather_api_cache()
                         result = call_bike_power_calc(run_config, st.session_state.generate_pdf, st.session_state.generate_html_map)
                         profile["calculation_s"] = time.perf_counter() - t_calc_start
 

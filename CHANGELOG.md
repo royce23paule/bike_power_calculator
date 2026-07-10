@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.2 – 2026-07-10
+
+### Neu
+- Persistenter 30-Tage-Cache für Open-Meteo-Abfragen
+- Option „Online-Wetter neu laden“
+- Cache-Diagnose im Entwicklermodus
+- API-Benchmarkreferenz
+
+### Unverändert
+- Physikalische Berechnung
+- API-Interpolation und Wetterwerte
+
 ## Version 2.1 – 2026-07-10
 
 ### Neu
