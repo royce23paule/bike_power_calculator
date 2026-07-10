@@ -1,26 +1,15 @@
 # Changelog
 
-## 2.2 – 2026-07-10
+## 2.3
 
 ### Neu
-- Persistenter 30-Tage-Cache für Open-Meteo-Abfragen
-- Option „Online-Wetter neu laden“
-- Cache-Diagnose im Entwicklermodus
-- API-Benchmarkreferenz
+- Automatischer Benchmarkvergleich im Entwicklermodus
+- Vergleich von Radzeit, Distanz, Geschwindigkeit, AP, NP und Höhenmetern
+- Toleranzbasierter Status je Kennzahl
+- Performancevergleich des Bike-Power-Hauptlaufs
+- Anzeige der Wetter-Cache-Treffer, Fehlschläge und API-Anfragen
 
 ### Unverändert
 - Physikalische Berechnung
-- API-Interpolation und Wetterwerte
-
-## Version 2.1 – 2026-07-10
-
-### Neu
-- Umschaltbarer Entwicklermodus
-- System- und Ergebnisdiagnose
-- Projektinformationen in der App
-
-### Verbessert
-- Laufzeitprofile sind im Normalmodus ausgeblendet
-
-### Rechenkern
-- Unverändert gegenüber Version 2.0 / stabile Basis 1.5.1
+- Online-Wettermodell
+- PDF- und Kartenlogik

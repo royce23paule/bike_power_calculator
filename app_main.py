@@ -27,12 +27,13 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-APP_VERSION = "2.2"
+APP_VERSION = "2.3"
 BUILD_DATE = "2026-07-10"
-ENGINE_VERSION = "1.5.1-cache"
+ENGINE_VERSION = "1.5.1-cache-benchmark"
 
 CHANGELOG = {
     "Neu": [
+        "Automatischer Vergleich aktueller Ergebnisse mit der API-Benchmarkreferenz",
         "Persistenter Cache für Open-Meteo-API-Abfragen",
         "Manueller Neuabruf der Online-Wetterdaten",
         "System- und Ergebnisdiagnose",
@@ -497,8 +498,130 @@ def format_bytes(value: int) -> str:
     return f"{value} B"
 
 
+
+BENCHMARK_REFERENCE_PATH = Path(__file__).parent / "data" / "Benchmark_Reference_API.json"
+
+BENCHMARK_TOLERANCES = {
+    "duration_s": 0.5,
+    "distance_km": 0.01,
+    "average_speed_kmh": 0.01,
+    "average_power_w": 0.1,
+    "normalized_power_w": 0.1,
+    "elevation_gain_m": 0.5,
+}
+
+
+def parse_hhmmss(value: str) -> float:
+    hours, minutes, seconds = [float(part) for part in value.split(":")]
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def load_benchmark_reference() -> dict[str, Any] | None:
+    try:
+        return json.loads(BENCHMARK_REFERENCE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def find_profile_time(result: dict[str, Any], label: str) -> float | None:
+    steps = result.get("profile_steps")
+    if not isinstance(steps, list):
+        return None
+    for step in steps:
+        if step.get("Abschnitt") == label:
+            try:
+                return float(step.get("Zeit [s]"))
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def render_benchmark_comparison(result: dict[str, Any] | None) -> None:
+    st.subheader("Benchmark: Aktuell vs. Referenz")
+    reference = load_benchmark_reference()
+    if reference is None:
+        st.warning("Benchmark_Reference_API.json konnte nicht geladen werden.")
+        return
+    if not result:
+        st.info("Nach einer Berechnung erscheint hier der automatische Referenzvergleich.")
+        return
+
+    ref = reference.get("results", {})
+    definitions = [
+        ("Radzeit", "duration_s", parse_hhmmss(str(ref.get("ride_time"))), "s", lambda v: format_duration(v)),
+        ("Distanz", "distance_km", ref.get("distance_km"), "km", lambda v: f"{v:.2f} km"),
+        ("Ø Geschwindigkeit", "average_speed_kmh", ref.get("average_speed_kmh"), "km/h", lambda v: f"{v:.2f} km/h"),
+        ("Average Power", "average_power_w", ref.get("average_power_w"), "W", lambda v: f"{v:.1f} W"),
+        ("Normalized Power", "normalized_power_w", ref.get("normalized_power_w"), "W", lambda v: f"{v:.1f} W"),
+        ("Höhenmeter", "elevation_gain_m", ref.get("elevation_gain_m"), "m", lambda v: f"{v:.2f} m"),
+    ]
+
+    rows = []
+    all_ok = True
+    for label, key, ref_value, unit, formatter in definitions:
+        current = result.get(key)
+        if current is None or ref_value is None:
+            rows.append({
+                "Kennzahl": label,
+                "Referenz": "—" if ref_value is None else formatter(float(ref_value)),
+                "Aktuell": "—",
+                "Abweichung": "—",
+                "Status": "⚪ nicht verfügbar",
+            })
+            all_ok = False
+            continue
+
+        current = float(current)
+        ref_value = float(ref_value)
+        delta = current - ref_value
+        tolerance = BENCHMARK_TOLERANCES[key]
+        ok = abs(delta) <= tolerance
+        all_ok = all_ok and ok
+        if key == "duration_s":
+            delta_text = f"{delta:+.2f} s"
+        else:
+            delta_text = f"{delta:+.3f} {unit}"
+        rows.append({
+            "Kennzahl": label,
+            "Referenz": formatter(ref_value),
+            "Aktuell": formatter(current),
+            "Abweichung": delta_text,
+            "Status": "✅ innerhalb Toleranz" if ok else "❌ abweichend",
+        })
+
+    if all_ok:
+        st.success("Alle verfügbaren Benchmarkwerte liegen innerhalb der festgelegten Toleranzen.")
+    else:
+        st.warning("Mindestens ein Benchmarkwert fehlt oder liegt außerhalb der Toleranz.")
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    current_core = find_profile_time(result, "Bike-Power-Kalkulation Hauptlauf")
+    perf_ref = reference.get("performance_reference", {})
+    reference_core = perf_ref.get("bike_power_calculation_s_uncached")
+    cache_info = result.get("weather_api_cache") or {}
+
+    perf_rows = []
+    if current_core is not None and reference_core is not None:
+        delta = current_core - float(reference_core)
+        percent = delta / float(reference_core) * 100 if float(reference_core) else 0.0
+        perf_rows.append({
+            "Kennzahl": "Bike-Power-Hauptlauf",
+            "Referenz": f"{float(reference_core):.3f} s",
+            "Aktuell": f"{current_core:.3f} s",
+            "Änderung": f"{delta:+.3f} s ({percent:+.1f} %)",
+        })
+    perf_rows.extend([
+        {"Kennzahl": "API-Cache Treffer", "Referenz": "—", "Aktuell": str(cache_info.get("hits", "—")), "Änderung": "—"},
+        {"Kennzahl": "API-Cache Fehlschläge", "Referenz": "—", "Aktuell": str(cache_info.get("misses", "—")), "Änderung": "—"},
+        {"Kennzahl": "API-Anfragen", "Referenz": "—", "Aktuell": str(cache_info.get("requests", "—")), "Änderung": "—"},
+    ])
+    st.markdown("**Performance und Wetter-Cache**")
+    st.dataframe(pd.DataFrame(perf_rows), use_container_width=True, hide_index=True)
+
 def render_developer_diagnostics(result: dict[str, Any] | None, profile: dict[str, float] | None) -> None:
     st.subheader("Entwicklerdiagnose")
+    render_benchmark_comparison(result)
+    st.divider()
 
     point_count = 0
     if result:
@@ -536,7 +659,7 @@ def render_developer_diagnostics(result: dict[str, Any] | None, profile: dict[st
                     st.bar_chart(df_steps.set_index("Abschnitt")["Zeit [s]"])
                 st.dataframe(df_steps, use_container_width=True, hide_index=True)
 
-    with st.expander("Changelog Version 2.1"):
+    with st.expander(f"Changelog Version {APP_VERSION}"):
         for category, entries in CHANGELOG.items():
             st.markdown(f"**{category}**")
             if entries:

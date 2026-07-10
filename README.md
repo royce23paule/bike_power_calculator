@@ -1,25 +1,18 @@
-# Bike Power Calculator – Version 2.1
+# Bike Power Calculator – Version 2.3
 
-## Neu
-- Entwicklermodus in der Sidebar
-- Systeminformationen und Diagnosewerte
-- Laufzeitprofile nur bei aktiviertem Entwicklermodus
-- In-App-Changelog und Projektinformationen
+Version 2.3 ergänzt im Entwicklermodus einen automatischen Vergleich des aktuellen Laufs mit `data/Benchmark_Reference_API.json`.
 
-## Start
+Verglichen werden:
+- Radzeit
+- Distanz
+- mittlere Geschwindigkeit
+- Average Power
+- Normalized Power
+- Höhenmeter
+- Laufzeit des Bike-Power-Hauptlaufs
+- Wetter-Cache-Statistik
+
+Start:
 ```bash
-pip install -r requirements.txt
 streamlit run app.py
 ```
-
-## Referenzdaten
-- `data/Default_INPUT.json`
-- `data/Challange_Roth_Bike_2025.gpx`
-
-
-## Version 2.2 – Online-Wetter-Cache
-
-- Open-Meteo-Antworten werden 30 Tage persistent zwischengespeichert.
-- Identische Wiederholungsberechnungen benötigen keine erneuten Netzwerkabfragen.
-- Mit **Online-Wetter neu laden** kann der Cache bewusst geleert werden.
-- Der erste Lauf mit neuen Koordinaten bleibt netzwerkabhängig; Folgeläufe sollten deutlich schneller sein.
