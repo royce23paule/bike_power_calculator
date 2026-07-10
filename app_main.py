@@ -3,6 +3,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import platform
+import sys
 import tempfile
 import time
 import traceback
@@ -11,6 +13,7 @@ from typing import Any
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 
 import bike_power_calc as bpc
@@ -23,6 +26,22 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+APP_VERSION = "2.1"
+BUILD_DATE = "2026-07-10"
+ENGINE_VERSION = "1.5.1"
+
+CHANGELOG = {
+    "Neu": [
+        "Umschaltbarer Entwicklermodus",
+        "System- und Ergebnisdiagnose",
+        "Projektinformationen und Changelog in der App",
+    ],
+    "Verbessert": [
+        "Laufzeitprofile sind im Normalmodus ausgeblendet",
+    ],
+    "Behoben": [],
+}
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +99,8 @@ def init_session_state() -> None:
         st.session_state.generate_html_map = True
     if "last_loaded_json_name" not in st.session_state:
         st.session_state.last_loaded_json_name = None
+    if "developer_mode" not in st.session_state:
+        st.session_state.developer_mode = False
 
 
 def config_to_json_bytes(config: dict[str, Any]) -> bytes:
@@ -440,6 +461,87 @@ def render_profile(profile: dict[str, float] | None) -> None:
         ]
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
+def estimate_result_size_bytes(result: dict[str, Any] | None) -> int:
+    """Grobe rekursive Schätzung des Ergebnisobjekts im Arbeitsspeicher."""
+    if result is None:
+        return 0
+
+    seen: set[int] = set()
+
+    def size_of(value: Any) -> int:
+        object_id = id(value)
+        if object_id in seen:
+            return 0
+        seen.add(object_id)
+
+        size = sys.getsizeof(value)
+        if isinstance(value, dict):
+            size += sum(size_of(k) + size_of(v) for k, v in value.items())
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            size += sum(size_of(item) for item in value)
+        return size
+
+    return size_of(result)
+
+
+def format_bytes(value: int) -> str:
+    units = ["B", "KB", "MB", "GB"]
+    number = float(value)
+    for unit in units:
+        if number < 1024 or unit == units[-1]:
+            return f"{number:.1f} {unit}"
+        number /= 1024
+    return f"{value} B"
+
+
+def render_developer_diagnostics(result: dict[str, Any] | None, profile: dict[str, float] | None) -> None:
+    st.subheader("Entwicklerdiagnose")
+
+    point_count = 0
+    if result:
+        for key in ("pos", "t_cumm", "h", "v", "power"):
+            series = result.get(key)
+            if isinstance(series, list):
+                point_count = max(point_count, len(series))
+
+    cols = st.columns(4)
+    cols[0].metric("Streckenpunkte", f"{point_count:,}".replace(",", "."))
+    cols[1].metric("Ergebnisgröße", format_bytes(estimate_result_size_bytes(result)))
+    cols[2].metric("Python", platform.python_version())
+    cols[3].metric("NumPy", np.__version__)
+
+    info_rows = [
+        {"Eigenschaft": "App-Version", "Wert": APP_VERSION},
+        {"Eigenschaft": "Build", "Wert": BUILD_DATE},
+        {"Eigenschaft": "Rechenkern-Basis", "Wert": ENGINE_VERSION},
+        {"Eigenschaft": "Streamlit", "Wert": st.__version__},
+        {"Eigenschaft": "Pandas", "Wert": pd.__version__},
+        {"Eigenschaft": "Betriebssystem", "Wert": platform.platform()},
+        {"Eigenschaft": "GPX/FIT-Datei", "Wert": str(st.session_state.config.get("GPX/FIT Datei", ""))},
+    ]
+    st.dataframe(pd.DataFrame(info_rows), use_container_width=True, hide_index=True)
+
+    render_profile(profile)
+
+    if result:
+        steps = result.get("profile_steps")
+        if isinstance(steps, list) and steps:
+            with st.expander("Detail-Profil der Berechnung", expanded=True):
+                df_steps = pd.DataFrame(steps)
+                if "Zeit [s]" in df_steps.columns:
+                    df_steps["Zeit [s]"] = df_steps["Zeit [s]"].astype(float)
+                    st.bar_chart(df_steps.set_index("Abschnitt")["Zeit [s]"])
+                st.dataframe(df_steps, use_container_width=True, hide_index=True)
+
+    with st.expander("Changelog Version 2.1"):
+        for category, entries in CHANGELOG.items():
+            st.markdown(f"**{category}**")
+            if entries:
+                for entry in entries:
+                    st.write(f"✓ {entry}")
+            else:
+                st.write("–")
+
 # ---------------------------------------------------------------------------
 # Result rendering
 # ---------------------------------------------------------------------------
@@ -506,8 +608,6 @@ def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[st
     if not result:
         return
 
-    render_profile(profile)
-
     st.subheader("Ergebnisse")
 
     distance = result.get("distance_km")
@@ -526,14 +626,6 @@ def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[st
     pdf_path = Path(pdf_path_value) if pdf_path_value else None
     map_path = Path(map_path_value) if map_path_value else None
 
-    steps = result.get("profile_steps")
-    if isinstance(steps, list) and steps:
-        with st.expander("Detail-Profil der Berechnung", expanded=True):
-            df_steps = pd.DataFrame(steps)
-            if "Zeit [s]" in df_steps.columns:
-                df_steps["Zeit [s]"] = df_steps["Zeit [s]"].astype(float)
-                st.bar_chart(df_steps.set_index("Abschnitt")["Zeit [s]"])
-            st.dataframe(df_steps, use_container_width=True, hide_index=True)
 
     download_cols = st.columns(2)
 
@@ -600,7 +692,7 @@ def main() -> None:
     init_session_state()
 
     st.title("🚴 Bike Power Calculator")
-    st.caption("Streamlit-Migration der bestehenden Desktop-App – Version 1.5.1")
+    st.caption(f"Version {APP_VERSION} – stabiler Rechenkern mit optionalem Entwicklermodus")
 
     with st.sidebar:
         st.header("Einstellungen")
@@ -633,7 +725,12 @@ def main() -> None:
         )
 
         st.divider()
-        st.success("Version 1.5.1: Version 1.5.1: Ausgabeoptionen direkt vor Berechnung.")
+        st.session_state.developer_mode = st.toggle(
+            "Entwicklermodus",
+            value=st.session_state.developer_mode,
+            help="Zeigt Laufzeitprofile, Systeminformationen und Diagnosewerte.",
+        )
+        st.caption(f"Version {APP_VERSION} · Build {BUILD_DATE}")
 
     config = st.session_state.config.copy()
 
@@ -747,8 +844,13 @@ def main() -> None:
 
     render_results(st.session_state.result, st.session_state.run_log, st.session_state.profile)
 
-    with st.expander("Aktuelle Konfiguration anzeigen"):
-        st.json(st.session_state.config)
+    if st.session_state.developer_mode:
+        render_developer_diagnostics(st.session_state.result, st.session_state.profile)
+        with st.expander("Aktuelle Konfiguration anzeigen"):
+            st.json(st.session_state.config)
+
+    st.divider()
+    st.caption(f"Bike Power Calculator · Version {APP_VERSION} · Build {BUILD_DATE} · Rechenkern {ENGINE_VERSION}")
 
 
 if __name__ == "__main__":
