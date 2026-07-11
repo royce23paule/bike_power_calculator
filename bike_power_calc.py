@@ -1317,25 +1317,86 @@ def bike_power_calc_FIT(NP_Soll):
             n_moving_ave_AP_fit=max(0,n_moving_ave_AP_fit_err2_min-1)
             f_NP_Soll=1
         print('Start NP & AP Iteration mit n_moving_ave_AP_fit = ',n_moving_ave_AP_fit,' und f_NP_Soll = ',f_NP_Soll)
-        Power_fit_Input=np.array(moving_ave(Power_fit,n_moving_ave_AP_fit))*f_NP_Soll
+
+        # Geglättete Leistungskurven und deren AP/NP-Verhältnis sind unabhängig
+        # von der zeitaufwendigen Fahrphysik. Sie werden deshalb einmal lokal
+        # vorbereitet und dienen als Surrogat, um den nächsten sinnvollen
+        # Glättungswert direkt zu schätzen.
+        _fit_smooth_cache={}
+        _fit_ratio_cache={}
+
+        def _fit_smoothed(n_value):
+            n_value=int(max(0,min(80,n_value)))
+            if n_value not in _fit_smooth_cache:
+                _fit_smooth_cache[n_value]=np.asarray(moving_ave(Power_fit,n_value),dtype=float)
+            return _fit_smooth_cache[n_value]
+
+        def _fit_ap_np_ratio(n_value):
+            n_value=int(max(0,min(80,n_value)))
+            if n_value not in _fit_ratio_cache:
+                values=_fit_smoothed(n_value)[1:]
+                if len(values)==0:
+                    ratio=0
+                else:
+                    ap_est=np.mean(values)
+                    np_est=np.mean(values**4)**0.25
+                    ratio=ap_est/np_est if np_est!=0 else 0
+                _fit_ratio_cache[n_value]=ratio
+            return _fit_ratio_cache[n_value]
+
+        def _estimate_best_smoothing(current_n,current_ap):
+            # Die Differenz zwischen dem schnellen Surrogat und der vollständigen
+            # Simulation wird am aktuellen Punkt kalibriert. Anschließend wird
+            # der ganzzahlige Wert 0..80 mit der kleinsten erwarteten AP-Abweichung
+            # ausgewählt.
+            current_est=NP_Soll*_fit_ap_np_ratio(current_n)
+            correction=current_ap-current_est
+            candidates=range(0,81)
+            return min(candidates,key=lambda n: abs(NP_Soll*_fit_ap_np_ratio(n)+correction-pol_a0))
+
+        Power_fit_Input=_fit_smoothed(n_moving_ave_AP_fit)*f_NP_Soll
         bike_power_main_calc(Power_fit_Input)
         residuum=NP-NP_Soll
         residuumAP=AP-pol_a0
-        while abs(residuum)>0.1 or abs(residuumAP)>0.5:
-            f_NP_Soll=f_NP_Soll*NP_Soll/NP
-            Power_fit_Input=np.array(moving_ave(Power_fit,n_moving_ave_AP_fit))*f_NP_Soll
+        _fit_iteration=0
+        _fit_max_iterations=12
+        _visited_smoothing={int(n_moving_ave_AP_fit)}
+
+        while (abs(residuum)>0.1 or abs(residuumAP)>0.5) and _fit_iteration<_fit_max_iterations:
+            _fit_iteration+=1
+            if NP!=0:
+                f_NP_Soll=f_NP_Soll*NP_Soll/NP
+            Power_fit_Input=_fit_smoothed(n_moving_ave_AP_fit)*f_NP_Soll
             print('vor Iteration Anpassen NP & AP',NP,AP,n_moving_ave_AP_fit)
             bike_power_main_calc(Power_fit_Input)
             print('nach Iteration Anpassen NP & AP',NP,AP,n_moving_ave_AP_fit)
             residuum=NP-NP_Soll
-            if abs(residuum)<=0.1:
-                residuumAP=AP-pol_a0
-                if abs(residuumAP)>0.5:
+            residuumAP=AP-pol_a0
+
+            if abs(residuum)<=0.1 and abs(residuumAP)>0.5:
+                n_candidate=_estimate_best_smoothing(n_moving_ave_AP_fit,AP)
+
+                # Falls die Schätzung keinen neuen Wert liefert oder zwischen
+                # bereits getesteten Werten pendeln würde, bleibt die bisherige
+                # robuste Schrittlogik als Fallback erhalten.
+                if n_candidate==n_moving_ave_AP_fit or n_candidate in _visited_smoothing:
                     if residuumAP>0:
-                        n_moving_ave_AP_fit=max(0,n_moving_ave_AP_fit-1)
-                        if n_moving_ave_AP_fit==0: residuumAP=0
+                        n_candidate=max(0,n_moving_ave_AP_fit-1)
                     else:
-                        n_moving_ave_AP_fit+=4
+                        n_candidate=min(80,n_moving_ave_AP_fit+4)
+
+                if n_candidate==n_moving_ave_AP_fit:
+                    if n_moving_ave_AP_fit==0:
+                        residuumAP=0
+                    else:
+                        break
+                else:
+                    print('Direkte AP-Schaetzung: n_moving_ave_AP_fit',n_moving_ave_AP_fit,'->',n_candidate)
+                    n_moving_ave_AP_fit=n_candidate
+                    _visited_smoothing.add(int(n_moving_ave_AP_fit))
+
+        if _fit_iteration>=_fit_max_iterations and (abs(residuum)>0.1 or abs(residuumAP)>0.5):
+            print('WARNUNG: Maximale Anzahl NP/AP-Iterationen erreicht',NP,AP,n_moving_ave_AP_fit)
         print('Ende NP & AP Iteration mit n_moving_ave_AP_fit =',n_moving_ave_AP_fit,' und f_NP_Soll = ',f_NP_Soll)
         Create_Init_Parameter_File_fit(Init_Parameter_File_fit,n_moving_ave_AP_fit,f_NP_Soll)  
             

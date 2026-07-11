@@ -1,6 +1,6 @@
-# Bike Power Calculator – Version 2.4
+# Bike Power Calculator – Version 2.5
 
-Version 2.4 optimiert die Berechnung langer FIT-Dateien, ohne die physikalischen Formeln zu verändern.
+Version 2.5 optimiert die Berechnung langer FIT-Dateien, ohne die physikalischen Formeln zu verändern.
 
 ## Neu / verbessert
 
@@ -28,3 +28,12 @@ Behoben:
 - Der Fehler konnte insbesondere nach positiver Vorgabe des Höhengewinns auftreten.
 - Bei 0 W werden Fett- und Kohlenhydratanteil für die Darstellung auf 0 gesetzt.
 - Berechnungen bei positiven Leistungswerten bleiben unverändert.
+
+
+## Version 2.5
+
+- Adaptive NP/AP-Kalibrierung für FIT-Dateien.
+- Der Glättungswert springt anhand eines kalibrierten AP/NP-Surrogats direkt zum wahrscheinlich passenden Wert.
+- Robuste alte Schrittlogik bleibt als Fallback erhalten.
+- Maximal 12 NP/AP-Vollberechnungen verhindern Endlosschleifen.
+- CdA-Suche und physikalischer Rechenkern bleiben unverändert.
