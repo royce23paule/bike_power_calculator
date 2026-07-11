@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.4
+
+### Performance
+- AP/NP-Endwerte werden nach der Punktschleife einmalig berechnet.
+- Vermeidet O(n²)-Summierung bei langen FIT-Dateien.
+
+### Unverändert
+- Physikalische Berechnung, Iterationsziele und Ausgabeformate.
+
 ## 2.3
 
 ### Neu

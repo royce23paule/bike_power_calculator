@@ -1192,9 +1192,21 @@ def bike_power_main_calc(Power_fit_Input):
         P_Save.append(P_Save_tmp)
         rho_List.append(rho)
         v_w_List.append(v_w*3.6)
-        n=len(t)
-        NP=(np.sum(tP4[1:n])/np.sum(t[1:n]))**0.25
-        AP=(np.sum(tP[1:n])/np.sum(t[1:n]))
+
+    # AP und NP werden nur für das Endergebnis dieses vollständigen Laufs
+    # benötigt. Die bisherige Berechnung nach jedem einzelnen FIT-/GPX-Punkt
+    # führte bei langen FIT-Dateien zu quadratischer Laufzeit, obwohl stets
+    # dieselben finalen Summen verwendet werden. Die Formeln und Arrays bleiben
+    # unverändert; sie werden lediglich einmal nach Abschluss der Schleife
+    # ausgewertet.
+    n=len(t)
+    sum_t=np.sum(t[1:n])
+    if sum_t > 0:
+        NP=(np.sum(tP4[1:n])/sum_t)**0.25
+        AP=(np.sum(tP[1:n])/sum_t)
+    else:
+        NP=0
+        AP=0
 
 def bike_power_calc(NP_Soll):
     if Use_GPX_Input:

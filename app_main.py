@@ -27,7 +27,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-APP_VERSION = "2.3"
+APP_VERSION = "2.4"
 BUILD_DATE = "2026-07-10"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
