@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.6
+- Detailliertes Profiling innerhalb von `bike_power_main_calc()`
+- Zeit pro Abschnitt
+- Aufrufszahlen und Millisekunden pro Aufruf
+- Top-5-Zeitfresser im Entwicklermodus
+- Keine Änderung der Berechnungslogik
+
+
 ## 2.4
 
 ### Performance

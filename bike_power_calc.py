@@ -444,6 +444,11 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     global API_Cache_Hits, API_Cache_Misses, API_Request_Count
     #get_ipython().run_line_magic('matplotlib', 'inline')
     _profile_steps = []
+    _kernel_profile = {
+        'sections': {},
+        'calls': {},
+        'meta': {}
+    }
     _profile_last = time.perf_counter()
 
     def _profile_mark(name):
@@ -575,6 +580,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'elevation_gain_m': float(el_gain_from_height(h)) if 'h' in globals() and len(h) > 0 else None,
         'weather_api_cache': get_weather_api_cache_info() if API_Weather else None,
         'profile_steps': _profile_steps,
+        'kernel_profile': _kernel_profile,
     }
     # Zusatzdaten für interaktive Streamlit/Plotly-Diagramme.
     # Die Berechnung selbst bleibt unverändert; hier werden nur bereits berechnete
@@ -1134,7 +1140,17 @@ def smooth_height_data():
         plt.close()        
         
 def bike_power_main_calc(Power_fit_Input):
+    global _kernel_profile
     global t,power,tP4,t_cumm,grade,v,P_r_rel,P_g_rel,P_l_rel,NP,AP,P_ges,P_Save,cdA_List,rho_List,v_w_List
+    _kernel_profile['sections'] = {}
+    _kernel_profile['calls'] = {}
+    _kernel_profile['meta'] = {}
+
+    def _kp_add(name, elapsed, calls=1):
+        _kernel_profile['sections'][name] = _kernel_profile['sections'].get(name, 0.0) + elapsed
+        _kernel_profile['calls'][name] = _kernel_profile['calls'].get(name, 0) + calls
+
+    _kp_total_start = time.perf_counter()
     #Berechnungen durchführen
     grade = [nan]
     power = [nan]
@@ -1152,19 +1168,27 @@ def bike_power_main_calc(Power_fit_Input):
     rho_List=[nan]
     v_w_List=[nan]
     for i in range(1,len(pos)):     
+        _kp_t0 = time.perf_counter()
         grade_tmp=h[i]-h[i-1]
         if grade_tmp!=0:
-            grade_tmp=grade_tmp/((pos[i]-pos[i-1])*1000)*100    
+            grade_tmp=grade_tmp/((pos[i]-pos[i-1])*1000)*100
+        _kp_add('Steigung berechnen', time.perf_counter()-_kp_t0)    
         if grade_tmp>0:
             pol_a1=pol_a1p
         else:
             pol_a1=pol_a1m    
+        _kp_t0 = time.perf_counter()
         power_tmp=pol_a0+pol_a1*grade_tmp        
         power_tmp=min(max(power_tmp,power_min),power_max)    
         if not Use_GPX_Input: power_tmp=Power_fit_Input[i]
+        _kp_add('Leistungsinput bestimmen', time.perf_counter()-_kp_t0)
         h_mean=0.5*(h[i]+h[i-1])
+        _kp_t0 = time.perf_counter()
         v_b = calc_v(power_tmp,grade_tmp,h_mean,direction[i],dir_w,v_w0,False) #/m/s
+        _kp_add('calc_v gesamt', time.perf_counter()-_kp_t0)
+        _kp_t0 = time.perf_counter()
         t_tmp = ((pos[i]-pos[i-1])*1000) / v_b
+        _kp_add('Zeitinkrement berechnen', time.perf_counter()-_kp_t0)
         t_cumm.append(t_cumm[i-1]+t_tmp) 
         #vmean_cumm = pos[i] / (t_cumm[i]/3600)
         P_r_dyn = f_r_dyn*v_b**2

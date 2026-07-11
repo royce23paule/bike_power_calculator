@@ -814,6 +814,45 @@ def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[st
 # Main
 # ---------------------------------------------------------------------------
 
+
+def render_kernel_profile(result: dict) -> None:
+    kernel = result.get("kernel_profile")
+    if not isinstance(kernel, dict):
+        return
+
+    sections = kernel.get("sections", {})
+    calls = kernel.get("calls", {})
+    meta = kernel.get("meta", {})
+    if not sections:
+        return
+
+    rows = []
+    for name, seconds in sections.items():
+        count = int(calls.get(name, 0))
+        rows.append({
+            "Abschnitt": name,
+            "Zeit [s]": float(seconds),
+            "Aufrufe": count,
+            "ms/Aufruf": (float(seconds) * 1000 / count) if count else None,
+        })
+
+    df = pd.DataFrame(rows).sort_values("Zeit [s]", ascending=False)
+
+    st.subheader("Rechenkern-Performance")
+    cols = st.columns(3)
+    cols[0].metric("Berechnungspunkte", meta.get("points", "—"))
+    cols[1].metric("Gemessene Abschnitte", len(df))
+    total = sections.get("bike_power_main_calc gesamt")
+    cols[2].metric("Hauptlauf intern", "—" if total is None else f"{total:.2f} s")
+
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    top = df[df["Abschnitt"] != "bike_power_main_calc gesamt"].head(5)
+    if not top.empty:
+        st.caption("Top 5 Zeitfresser")
+        st.bar_chart(top.set_index("Abschnitt")["Zeit [s]"])
+
+
 def main() -> None:
     init_session_state()
 
@@ -984,6 +1023,8 @@ def main() -> None:
                     st.code(st.session_state.run_log)
 
     render_results(st.session_state.result, st.session_state.run_log, st.session_state.profile)
+    if st.session_state.get("developer_mode", False) and st.session_state.result:
+        render_kernel_profile(st.session_state.result)
 
     if st.session_state.developer_mode:
         render_developer_diagnostics(st.session_state.result, st.session_state.profile)

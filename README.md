@@ -37,3 +37,9 @@ Behoben:
 - Robuste alte Schrittlogik bleibt als Fallback erhalten.
 - Maximal 12 NP/AP-Vollberechnungen verhindern Endlosschleifen.
 - CdA-Suche und physikalischer Rechenkern bleiben unverändert.
+
+
+## Version 2.6
+
+Diese Version enthält ausschließlich detailliertes Rechenkern-Profiling.
+Im Entwicklermodus werden Zeit, Aufrufszahl und mittlere Dauer pro Aufruf angezeigt.
