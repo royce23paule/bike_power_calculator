@@ -1562,16 +1562,33 @@ def Substratverlauf():
     # for Pow in power:
     for i in range(1,len(t_cumm)):
         Pow=power[i]
-        Fett_Ratio_tmp=function_y_Fett(Pow,a_tot_cal,fFatMax,PFatMax,FTP)/function_y_tot_cal(Pow,a_tot_cal)*100
+        total_cal_tmp=function_y_tot_cal(Pow,a_tot_cal)
+        fett_cal_tmp=function_y_Fett(Pow,a_tot_cal,fFatMax,PFatMax,FTP)
+        kh_cal_tmp=function_y_KH(Pow,a_tot_cal,fFatMax,PFatMax,FTP)
+
+        # Bei 0 W sind Gesamt-, Fett- und KH-Umsatz jeweils 0.
+        # Eine prozentuale Aufteilung ist dann nicht definiert; für die
+        # Darstellung werden beide Anteile auf 0 gesetzt. Positive
+        # Leistungswerte bleiben rechnerisch unverändert.
+        if total_cal_tmp == 0:
+            Fett_Ratio_tmp=0
+            KH_Ratio_tmp=0
+        else:
+            Fett_Ratio_tmp=fett_cal_tmp/total_cal_tmp*100
+            KH_Ratio_tmp=100-Fett_Ratio_tmp
+
         Fett_Ratio.append(Fett_Ratio_tmp)
-        KH_Ratio.append(100-Fett_Ratio_tmp)
-        tot_cal_sum_pre.append(tot_cal_sum_pre[i-1]+function_y_tot_cal(Pow,a_tot_cal)*(t_cumm[i]-t_cumm[i-1]))
-        Fett_sum_pre.append(Fett_sum_pre[i-1]+function_y_Fett(Pow,a_tot_cal,fFatMax,PFatMax,FTP)*(t_cumm[i]-t_cumm[i-1]))
-        KH_sum_pre.append(KH_sum_pre[i-1]+function_y_KH(Pow,a_tot_cal,fFatMax,PFatMax,FTP)*(t_cumm[i]-t_cumm[i-1]))
+        KH_Ratio.append(KH_Ratio_tmp)
+        tot_cal_sum_pre.append(tot_cal_sum_pre[i-1]+total_cal_tmp*(t_cumm[i]-t_cumm[i-1]))
+        Fett_sum_pre.append(Fett_sum_pre[i-1]+fett_cal_tmp*(t_cumm[i]-t_cumm[i-1]))
+        KH_sum_pre.append(KH_sum_pre[i-1]+kh_cal_tmp*(t_cumm[i]-t_cumm[i-1]))
     tot_cal_sum=[]
     Fett_sum=[]
     KH_sum=[]
-    corr_fac=cal_consumption/tot_cal_sum_pre[-1]
+    if tot_cal_sum_pre[-1] == 0:
+        corr_fac=0
+    else:
+        corr_fac=cal_consumption/tot_cal_sum_pre[-1]
     for i in range(len(tot_cal_sum_pre)):        
         tot_cal_sum.append(tot_cal_sum_pre[i]*corr_fac)
         Fett_sum.append(Fett_sum_pre[i]*corr_fac)
