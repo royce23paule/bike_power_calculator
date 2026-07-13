@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.11
+- Vollständige interaktive Auswertung aller PDF-Diagramme und PDF-Tabellen
+- Vorhandene Matplotlib-Reportdaten werden ohne erneute Physikberechnung übernommen
+- Gesamtbereich standardmäßig zugeklappt
+- Einzelne Diagramme und Tabellen separat ausklappbar
+- PDF bleibt als Dokumentation unverändert verfügbar
+
+
 ## 2.10.2
 - fNP wird zuverlässig in der CdA-Kalibrierung angezeigt
 - CdA-Startwert zusätzlich im Ergebnisbereich

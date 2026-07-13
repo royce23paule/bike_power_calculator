@@ -65,3 +65,11 @@ GPS-Arrays direkt aus dem Cache.
 ## Version 2.10
 
 FIT-basierte CdA-Kalibrierungen zeigen CdA, AP, NP, Geschwindigkeit, Kalibrierungsfaktor und Konvergenzstatus direkt in der Streamlit-App. Ein PDF ist nicht mehr erforderlich.
+
+
+## Version 2.11
+
+Unter „Interaktive Diagramme“ befindet sich eine standardmäßig zugeklappte
+vollständige Auswertung. Die bereits für den PDF-Bericht erzeugten Diagramme und
+Tabellen werden als interaktive Plotly-Grafiken beziehungsweise
+Streamlit-Tabellen dargestellt.

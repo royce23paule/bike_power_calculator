@@ -566,6 +566,155 @@ def Find_Index_Close(a,v): #Find the position p, where the value v has the close
     return p
     
 #-----------------------------------------------------------------------------------------------------------------------------------------
+
+def _report_json_value(value):
+    try:
+        if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+            return value.isoformat()
+        if isinstance(value, datetime.timedelta):
+            return str(value)
+    except Exception:
+        pass
+    try:
+        if hasattr(value, "item"):
+            return value.item()
+    except Exception:
+        pass
+    if isinstance(value, (int, float, str, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _downsample_xy(x_values, y_values, max_points=2500):
+    n = min(len(x_values), len(y_values))
+    if n <= 0:
+        return [], []
+    indices = range(n) if n <= max_points else np.linspace(0, n - 1, max_points, dtype=int)
+    return (
+        [_report_json_value(x_values[i]) for i in indices],
+        [_report_json_value(y_values[i]) for i in indices],
+    )
+
+
+def _serialize_matplotlib_table(table, title):
+    cells = table.get_celld()
+    if not cells:
+        return None
+    row_indices = sorted({position[0] for position in cells})
+    col_indices = sorted({position[1] for position in cells})
+    matrix = []
+    for row_index in row_indices:
+        row = []
+        for col_index in col_indices:
+            cell = cells.get((row_index, col_index))
+            row.append("" if cell is None else cell.get_text().get_text())
+        matrix.append(row)
+    if not matrix:
+        return None
+    return {
+        "kind": "table",
+        "title": title or "Tabelle",
+        "columns": [f"Spalte {i + 1}" for i in range(len(matrix[0]))],
+        "rows": matrix,
+    }
+
+
+def _serialize_matplotlib_figure(variable_name, figure, max_points=2500):
+    if figure in (None, 0) or not hasattr(figure, "get_axes"):
+        return []
+    axes = figure.get_axes()
+    if not axes:
+        return []
+
+    items = []
+    base_title = next((axis.get_title() for axis in axes if axis.get_title()), variable_name)
+
+    table_number = 0
+    for axis in axes:
+        for table in axis.tables:
+            table_number += 1
+            title = base_title if table_number == 1 else f"{base_title} – Tabelle {table_number}"
+            serialized = _serialize_matplotlib_table(table, title)
+            if serialized:
+                items.append(serialized)
+
+    series = []
+    x_axis_title = ""
+    for axis_index, axis in enumerate(axes):
+        if not x_axis_title and axis.get_xlabel():
+            x_axis_title = axis.get_xlabel()
+        y_label = axis.get_ylabel() or "Wert"
+
+        for line_index, line in enumerate(axis.get_lines()):
+            x_data = list(line.get_xdata())
+            y_data = list(line.get_ydata())
+            if len(x_data) < 2 or len(y_data) < 2:
+                continue
+            x_values, y_values = _downsample_xy(x_data, y_data, max_points=max_points)
+            label = line.get_label()
+            if not label or label.startswith("_"):
+                label = y_label if len(axis.get_lines()) == 1 else f"{y_label} {line_index + 1}"
+            series.append({
+                "type": "line",
+                "name": label,
+                "x": x_values,
+                "y": y_values,
+                "axis": 0 if axis_index == 0 else 1,
+                "y_label": y_label,
+            })
+
+        bars = []
+        for patch in axis.patches:
+            try:
+                width = float(patch.get_width())
+                height = float(patch.get_height())
+                x_pos = float(patch.get_x())
+            except Exception:
+                continue
+            if width > 0 and height != 0:
+                bars.append((x_pos + width / 2, height))
+        if len(bars) >= 3:
+            series.append({
+                "type": "bar",
+                "name": y_label or "Verteilung",
+                "x": [_report_json_value(value[0]) for value in bars],
+                "y": [_report_json_value(value[1]) for value in bars],
+                "axis": 0 if axis_index == 0 else 1,
+                "y_label": y_label,
+            })
+
+    if series:
+        items.insert(0, {
+            "kind": "chart",
+            "title": base_title,
+            "x_label": x_axis_title,
+            "series": series,
+        })
+    return items
+
+
+def _collect_interactive_report_items():
+    report_variables = [
+        "tab0", "tab1", "fig0", "fig1", "tab2", "tab3", "fig2", "fig3",
+        "tab5", "tab6", "tab4", "fig4", "fig5", "fig6", "fig7", "fig8",
+        "fig9", "fig10", "fig11", "fig12", "fig20", "fig15", "fig17",
+        "fig16", "fig16b", "fig13", "fig14", "fig18", "fig19", "fig21",
+        "fig22",
+    ]
+    items = []
+    for variable_name in report_variables:
+        figure = globals().get(variable_name)
+        try:
+            items.extend(_serialize_matplotlib_figure(variable_name, figure))
+        except Exception as exc:
+            items.append({
+                "kind": "note",
+                "title": variable_name,
+                "text": f"Interaktive Konvertierung nicht möglich: {exc}",
+            })
+    return items
+
+
 def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,eta_,cr_dyn_,cr_,cdA_Hill_,FTP_,power_max_liste_,NP_Soll_,pol_a0_,pol_grade_max_,power_min_,pol_grade_min_,dir_w_,v_w0_,T_Luft_,GPX_File_,Hoehengewinn_Soll_,Steigung_max_min_,sigma_filter_,x_Achse_,Histogram_Anz_Teilungen_,Gaus_Filter_,moving_ave_filter_,Open_HTML_Map_,Show_km_Markers_,Show_Plots_in_Run_,Use_AdvWeather_,API_Weather_,API_StratTime_,Wetterdatei_,Winddamping_,Anmerkungen,Speed_Soll,Start_Distance_,End_Distance_,Generate_PDF=True,Generate_HTML_Map=True):
     global cdA_Flat_Start
     global _weather_start_offset_seconds, _weather_fast_cache_hits, _weather_fast_cache_misses
@@ -706,7 +855,9 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     _profile_mark('Diagramme Geschwindigkeit/Steigung erzeugen')
     #time_in_power_zones()      
     print_statistics(i,False,True)
-    _profile_mark('Statistik final erzeugen') 
+    _profile_mark('Statistik final erzeugen')
+    interactive_report_items = _collect_interactive_report_items()
+    _profile_mark('Interaktive Reportdaten aufbereiten')
     pdf_path = None
     if Generate_PDF:
         pdf_path = pdf_save([txt0,tab0,tab1,fig0,fig1,tab2,tab3,fig2,fig3,tab5,tab6,tab4,fig4,fig5,fig6,fig7,fig8,fig9,fig10,fig11,fig12,fig20,fig15,fig17,fig16,fig16b,fig13,fig14,fig18,fig19,fig21,fig22], Title+'.pdf')
@@ -754,6 +905,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'calibration_runs': len(_run_profile_rows) if '_run_profile_rows' in globals() else None,
         'run_profile_rows': _run_profile_rows if '_run_profile_rows' in globals() else None,
         'weather_interpolation_cache': {'hits': _weather_fast_cache_hits, 'misses': _weather_fast_cache_misses},
+        'interactive_report_items': interactive_report_items,
     }
     # Zusatzdaten für interaktive Streamlit/Plotly-Diagramme.
     # Die Berechnung selbst bleibt unverändert; hier werden nur bereits berechnete
