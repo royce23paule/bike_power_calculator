@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.10.2
+- fNP wird zuverlässig in der CdA-Kalibrierung angezeigt
+- CdA-Startwert zusätzlich im Ergebnisbereich
+- Keine Änderung der Berechnungslogik
+
+
 ## 2.10.1
 - Durchschnittsgeschwindigkeit in der CdA-Kalibrierung korrekt angezeigt
 - Hauptlaufanzahl aus dem Deep-Profiler übernommen

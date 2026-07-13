@@ -11,6 +11,8 @@ import time
 
 # Moduleweiter Profiler-Speicher. Er wird zu Beginn jedes Run()-Aufrufs
 # zurückgesetzt und kann dadurch von den globalen Rechenfunktionen verwendet werden.
+cdA_Flat_Start = None
+
 _kernel_profile = {
     'sections': {},
     'calls': {},
@@ -565,6 +567,7 @@ def Find_Index_Close(a,v): #Find the position p, where the value v has the close
     
 #-----------------------------------------------------------------------------------------------------------------------------------------
 def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,eta_,cr_dyn_,cr_,cdA_Hill_,FTP_,power_max_liste_,NP_Soll_,pol_a0_,pol_grade_max_,power_min_,pol_grade_min_,dir_w_,v_w0_,T_Luft_,GPX_File_,Hoehengewinn_Soll_,Steigung_max_min_,sigma_filter_,x_Achse_,Histogram_Anz_Teilungen_,Gaus_Filter_,moving_ave_filter_,Open_HTML_Map_,Show_km_Markers_,Show_Plots_in_Run_,Use_AdvWeather_,API_Weather_,API_StratTime_,Wetterdatei_,Winddamping_,Anmerkungen,Speed_Soll,Start_Distance_,End_Distance_,Generate_PDF=True,Generate_HTML_Map=True):
+    global cdA_Flat_Start
     global _weather_start_offset_seconds, _weather_fast_cache_hits, _weather_fast_cache_misses
     global _kernel_profile, _kernel_run_context
     global power_max,m_sys,m_r,m_b
@@ -611,6 +614,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     m_sys = m_r_ + m_b_
     cdA_Hill_Grade=cdA_Hill_Grade_
     cdA_Flat=cdA_Flat_
+    cdA_Flat_Start = cdA_Flat
     Draft_Save_Grade=Draft_Save_Grade_
     Draft_Save=Draft_Save_
     eta=eta_
@@ -735,13 +739,17 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'fit_cache_write_s': FIT_Cache_Write_s,
         'fit_parse_s': FIT_Parse_s,
         'calibration_cda': cdA_Flat if 'cdA_Flat' in globals() else None,
+        'calibration_cda_start': cdA_Flat_Start,
         'calibration_ap': AP if 'AP' in globals() else None,
         'calibration_np': NP if 'NP' in globals() else None,
         'calibration_speed_kmh': v_ave if 'v_ave' in globals() else None,
         'calibration_target_speed_kmh': Speed_Soll if 'Speed_Soll' in locals() or 'Speed_Soll' in globals() else None,
         'calibration_target_ap': pol_a0 if 'pol_a0' in globals() else None,
         'calibration_target_np': NP_Soll if 'NP_Soll' in locals() else None,
-        'calibration_f_np': f_NP_Soll_fit if 'f_NP_Soll_fit' in globals() else None,
+        'calibration_f_np': (
+            f_NP_Soll_fit if 'f_NP_Soll_fit' in globals()
+            else (f_NP_Soll if 'f_NP_Soll' in globals() else None)
+        ),
         'calibration_moving_average': n_moving_ave_AP_fit if 'n_moving_ave_AP_fit' in globals() else None,
         'calibration_runs': len(_run_profile_rows) if '_run_profile_rows' in globals() else None,
         'run_profile_rows': _run_profile_rows if '_run_profile_rows' in globals() else None,

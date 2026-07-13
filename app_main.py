@@ -917,6 +917,7 @@ def render_fit_cache_debug(result: dict) -> None:
 def render_cda_calibration_summary(result: dict, config: dict) -> None:
     """Kompakte Ergebnisübersicht für FIT-basierte CdA-Kalibrierungen."""
     cda = result.get("calibration_cda")
+    cda_start = result.get("calibration_cda_start")
     ap = result.get("calibration_ap")
     np_value = result.get("calibration_np")
     speed = result.get("calibration_speed_kmh")
@@ -929,6 +930,16 @@ def render_cda_calibration_summary(result: dict, config: dict) -> None:
     f_np = result.get("calibration_f_np")
     moving_average = result.get("calibration_moving_average")
     runs = result.get("calibration_runs")
+
+    if f_np is None:
+        run_rows = result.get("run_profile_rows")
+        if isinstance(run_rows, list) and run_rows:
+            last_row = run_rows[-1]
+            if isinstance(last_row, dict):
+                for key in ("fNP", "f_NP", "f_NP_Soll", "f_NP_Soll_fit"):
+                    if last_row.get(key) is not None:
+                        f_np = last_row.get(key)
+                        break
 
     if runs is None:
         run_rows = result.get("run_profile_rows")
@@ -951,12 +962,13 @@ def render_cda_calibration_summary(result: dict, config: dict) -> None:
         pass
 
     st.subheader("CdA-Kalibrierung")
-    cols = st.columns(5)
-    cols[0].metric("CdA berechnet", "—" if cda is None else f"{float(cda):.5f}")
-    cols[1].metric("Average Power", "—" if ap is None else f"{float(ap):.2f} W")
-    cols[2].metric("Normalized Power", "—" if np_value is None else f"{float(np_value):.2f} W")
-    cols[3].metric("Ø Geschwindigkeit", "—" if speed is None else f"{float(speed):.3f} km/h")
-    cols[4].metric("Hauptläufe", "—" if runs is None else int(runs))
+    cols = st.columns(6)
+    cols[0].metric("CdA Startwert", "—" if cda_start is None else f"{float(cda_start):.5f}")
+    cols[1].metric("CdA berechnet", "—" if cda is None else f"{float(cda):.5f}")
+    cols[2].metric("Average Power", "—" if ap is None else f"{float(ap):.2f} W")
+    cols[3].metric("Normalized Power", "—" if np_value is None else f"{float(np_value):.2f} W")
+    cols[4].metric("Ø Geschwindigkeit", "—" if speed is None else f"{float(speed):.3f} km/h")
+    cols[5].metric("Hauptläufe", "—" if runs is None else int(runs))
 
     def delta(current, target):
         if current is None or target is None:
