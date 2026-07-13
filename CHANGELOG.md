@@ -1,6 +1,13 @@
 # Changelog
 
-## 2.7
+## 2.8
+- Online-Wetterinterpolation auf vorbereitete NumPy-Arrays umgestellt
+- Direkte O(1)-Indexberechnung statt wiederholter Datetime-Suche
+- Exakter, ergebnisneutraler Cache für identische Simulationszeitpunkte
+- Keine Änderung an Wettermodell oder physikalischen Formeln
+
+
+## 2.8
 - Kumuliertes Profil über alle FIT-Hauptläufe
 - Konvergenztabelle mit NP, AP, Geschwindigkeit, CdA, Glättung und fNP
 - Deep Profiling von calc_v()

@@ -64,6 +64,15 @@ API_Cache_Hits = 0
 API_Cache_Misses = 0
 API_Request_Count = 0
 
+# Vorbereitete numerische Wetterarrays für schnelle O(1)-Interpolation.
+# Die Werte werden nach jedem API-Abruf einmal aufgebaut und anschließend
+# ohne wiederholte Pandas-/Datetime-Konvertierungen verwendet.
+_weather_fast_arrays = None
+_weather_start_offset_seconds = None
+_weather_fast_cache_hits = 0
+_weather_fast_cache_misses = 0
+_weather_exact_cache = {}
+
 
 def _get_weather_cache_session():
     global _weather_cache_session
@@ -111,6 +120,88 @@ def get_weather_api_cache_info():
         'requests': API_Request_Count,
         'expire_days': _WEATHER_CACHE_EXPIRE_SECONDS / 86400,
     }
+
+def _prepare_fast_weather_arrays():
+    """Konvertiert die aktuelle API-Antwort einmalig in NumPy-Arrays."""
+    global _weather_fast_arrays, _weather_exact_cache
+    if 'hourly_data' not in globals() or hourly_data is None:
+        _weather_fast_arrays = None
+        return
+    _weather_fast_arrays = {
+        'dates': hourly_data['date'],
+        'temperature_2m': np.asarray(hourly_data['temperature_2m'], dtype=float),
+        'wind_speed_10m': np.asarray(hourly_data['wind_speed_10m'], dtype=float),
+        'wind_direction_10m': np.asarray(hourly_data['wind_direction_10m'], dtype=float),
+        'relative_humidity_2m': np.asarray(hourly_data['relative_humidity_2m'], dtype=float),
+        'surface_pressure': np.asarray(hourly_data['surface_pressure'], dtype=float),
+        'apparent_temperature': np.asarray(hourly_data['apparent_temperature'], dtype=float),
+        'wind_gusts_10m': np.asarray(hourly_data['wind_gusts_10m'], dtype=float),
+        'precipitation': np.asarray(hourly_data['precipitation'], dtype=float),
+    }
+    _weather_exact_cache = {}
+
+
+def _fast_interpolate_api_weather(t, StratTime):
+    """Mathematisch identische lineare Interpolation ohne lineare Suche."""
+    global datetime_StartTime, i_API_Start, _weather_start_offset_seconds
+    global _weather_fast_cache_hits, _weather_fast_cache_misses
+
+    if _weather_fast_arrays is None:
+        _prepare_fast_weather_arrays()
+    arrays = _weather_fast_arrays
+    dates = arrays['dates']
+    n = len(dates)
+
+    if t == 0 or _weather_start_offset_seconds is None:
+        start_requested = datetime.datetime.strptime(StratTime, '%Y-%m-%dT%H:%M')
+        if start_requested <= dates[0]:
+            datetime_StartTime = dates[12]
+        elif start_requested >= dates[n-1]:
+            datetime_StartTime = dates[n-12]
+        else:
+            datetime_StartTime = start_requested
+        i_API_Start = 0
+        _weather_start_offset_seconds = (pd.Timestamp(datetime_StartTime) - pd.Timestamp(dates[0])).total_seconds()
+
+    # Exakter Cache ist ergebnisneutral und hilft bei wiederholten identischen
+    # Zeitpunkten, z. B. Initial-/Hilfsaufrufen.
+    cache_key = float(t)
+    cached = _weather_exact_cache.get(cache_key)
+    if cached is not None:
+        _weather_fast_cache_hits += 1
+        return cached
+    _weather_fast_cache_misses += 1
+
+    relative_seconds = _weather_start_offset_seconds + float(t)
+    if relative_seconds <= 0:
+        ii = 0
+        fraction_seconds = 0.0
+    else:
+        ii = int(relative_seconds // 3600.0)
+        fraction_seconds = relative_seconds - ii * 3600.0
+        if ii >= n - 1:
+            ii = n - 2
+            fraction_seconds = 3600.0
+    i_API_Start = ii
+    f = fraction_seconds / 3600.0
+
+    def interp(name):
+        values = arrays[name]
+        return values[ii] + (values[ii + 1] - values[ii]) * f
+
+    result = (
+        interp('temperature_2m'),
+        interp('wind_speed_10m'),
+        interp('wind_direction_10m') + 180.0,
+        interp('relative_humidity_2m'),
+        interp('surface_pressure'),
+        interp('apparent_temperature'),
+        interp('wind_gusts_10m'),
+        interp('precipitation'),
+    )
+    _weather_exact_cache[cache_key] = result
+    return result
+
 
 def calc_rho_advanced(time):
     global time_new_Weather,AdvWeather_TempC,AdvWeather_AirSpeed,AdvWeather_AirDir,AdvWeather_AirMoisture,AdvWeather_AirPressure,AdvWeather_AirDensity,AdvWeather_ApparentT,AdvWeather_WindGusts,AdvWeather_Precipitation
@@ -219,58 +310,30 @@ def Get_API_Data(latitude,longitude,StratTime):
     hourly_data["wind_speed_10m"] = hourly_wind_speed_10m
     hourly_data["wind_direction_10m"] = hourly_wind_direction_10m
     hourly_data["wind_gusts_10m"] = hourly_wind_gusts_10m
+    _prepare_fast_weather_arrays()
     # print('END Get_API_Data')
 
 
-def interpolate_API_Weather_data(time,StratTime): 
-    global datetime_StartTime, i_API_Start
-    t=time[-1]
-    n=len(hourly_data['date'])
-    if t==0:
-        if datetime.datetime.strptime(StratTime, '%Y-%m-%dT%H:%M')<=hourly_data['date'][0]:
-            datetime_StartTime=hourly_data['date'][12]
-        elif datetime.datetime.strptime(StratTime, '%Y-%m-%dT%H:%M')>=hourly_data['date'][n-1]:
-            datetime_StartTime=hourly_data['date'][n-12]
-        else:
-            datetime_StartTime=datetime.datetime.strptime(StratTime, '%Y-%m-%dT%H:%M')   
-        i_API_Start=0
-    datetime_CurrentTime = datetime_StartTime+datetime.timedelta(seconds=t)
-    ii=-1
-    tt=0
-    for i in range(i_API_Start,n):
-        datetime_API_Time=hourly_data['date'][i]
-        if(ii==-1 and datetime_API_Time>datetime_CurrentTime):
-            ii=i-1
-            tt=datetime_API_Time-datetime_CurrentTime
-            tt=3600-tt.total_seconds()
-            # print('i,ii,i_API_Start,tt',i,ii,i_API_Start,tt)
-            i_API_Start=ii
-            break
-    if(ii<0): 
-        ii=n-2
-        tt=3600
-    AdvWeather_TempC_tmp=lin_interpolate(tt,0,3600,float(hourly_data['temperature_2m'][ii]),float(hourly_data['temperature_2m'][ii+1]))
-    AdvWeather_AirSpeed_tmp=lin_interpolate(tt,0,3600,float(hourly_data['wind_speed_10m'][ii]),float(hourly_data['wind_speed_10m'][ii+1]))
-    AdvWeather_AirDir_tmp=lin_interpolate(tt,0,3600,float(hourly_data['wind_direction_10m'][ii])+180,float(hourly_data['wind_direction_10m'][ii+1])+180)
-    AdvWeather_AirMoisture_tmp=lin_interpolate(tt,0,3600,float(hourly_data['relative_humidity_2m'][ii]),float(hourly_data['relative_humidity_2m'][ii+1]))
-    AdvWeather_AirPressure_tmp=lin_interpolate(tt,0,3600,float(hourly_data['surface_pressure'][ii]),float(hourly_data['surface_pressure'][ii+1]))
-    #Zusätzliche Daten nur für API Wetter
-    AdvWeather_ApparentT_tmp=lin_interpolate(tt,0,3600,float(hourly_data['apparent_temperature'][ii]),float(hourly_data['apparent_temperature'][ii+1]))    
-    AdvWeather_WindGusts_tmp=lin_interpolate(tt,0,3600,float(hourly_data['wind_gusts_10m'][ii]),float(hourly_data['wind_gusts_10m'][ii+1]))    
-    AdvWeather_Precipitation_tmp=lin_interpolate(tt,0,3600,float(hourly_data['precipitation'][ii]),float(hourly_data['precipitation'][ii+1]))    
+def interpolate_API_Weather_data(time,StratTime):
+    t = time[-1]
+    (AdvWeather_TempC_tmp,
+     AdvWeather_AirSpeed_tmp,
+     AdvWeather_AirDir_tmp,
+     AdvWeather_AirMoisture_tmp,
+     AdvWeather_AirPressure_tmp,
+     AdvWeather_ApparentT_tmp,
+     AdvWeather_WindGusts_tmp,
+     AdvWeather_Precipitation_tmp) = _fast_interpolate_api_weather(t, StratTime)
 
-    
     AdvWeather_TempC.append(AdvWeather_TempC_tmp)
     AdvWeather_AirSpeed.append(AdvWeather_AirSpeed_tmp)
     AdvWeather_AirDir.append(AdvWeather_AirDir_tmp)
     AdvWeather_AirMoisture.append(AdvWeather_AirMoisture_tmp)
     AdvWeather_AirPressure.append(AdvWeather_AirPressure_tmp)
-    #Zusätzliche Daten nur für API Wetter
     AdvWeather_ApparentT.append(AdvWeather_ApparentT_tmp)
     AdvWeather_WindGusts.append(AdvWeather_WindGusts_tmp)
     AdvWeather_Precipitation.append(AdvWeather_Precipitation_tmp)
-    
-            
+
 def interpolate_CSV_Weather_data(time):
     t=time[-1]
     n=len(AdvWeather_CSV_Data[:])
@@ -448,6 +511,7 @@ def Find_Index_Close(a,v): #Find the position p, where the value v has the close
     
 #-----------------------------------------------------------------------------------------------------------------------------------------
 def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,eta_,cr_dyn_,cr_,cdA_Hill_,FTP_,power_max_liste_,NP_Soll_,pol_a0_,pol_grade_max_,power_min_,pol_grade_min_,dir_w_,v_w0_,T_Luft_,GPX_File_,Hoehengewinn_Soll_,Steigung_max_min_,sigma_filter_,x_Achse_,Histogram_Anz_Teilungen_,Gaus_Filter_,moving_ave_filter_,Open_HTML_Map_,Show_km_Markers_,Show_Plots_in_Run_,Use_AdvWeather_,API_Weather_,API_StratTime_,Wetterdatei_,Winddamping_,Anmerkungen,Speed_Soll,Start_Distance_,End_Distance_,Generate_PDF=True,Generate_HTML_Map=True):
+    global _weather_start_offset_seconds, _weather_fast_cache_hits, _weather_fast_cache_misses
     global _kernel_profile, _kernel_run_context
     global power_max,m_sys,m_r,m_b
     global cdA_Hill_Grade,cdA_Flat,Draft_Save_Grade,Draft_Save,eta,cr_dyn,cr,cdA_Hill,FTP
@@ -460,6 +524,9 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     global API_Cache_Hits, API_Cache_Misses, API_Request_Count
     #get_ipython().run_line_magic('matplotlib', 'inline')
     _profile_steps = []
+    _weather_start_offset_seconds = None
+    _weather_fast_cache_hits = 0
+    _weather_fast_cache_misses = 0
     _kernel_profile.clear()
     _kernel_profile.update({
         'sections': {},
@@ -606,6 +673,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'weather_api_cache': get_weather_api_cache_info() if API_Weather else None,
         'profile_steps': _profile_steps,
         'kernel_profile': _kernel_profile,
+        'weather_interpolation_cache': {'hits': _weather_fast_cache_hits, 'misses': _weather_fast_cache_misses},
     }
     # Zusatzdaten für interaktive Streamlit/Plotly-Diagramme.
     # Die Berechnung selbst bleibt unverändert; hier werden nur bereits berechnete

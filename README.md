@@ -45,5 +45,10 @@ Diese Version enthält ausschließlich detailliertes Rechenkern-Profiling.
 Im Entwicklermodus werden Zeit, Aufrufszahl und mittlere Dauer pro Aufruf angezeigt.
 
 
-## Version 2.7
+## Version 2.8
 Deep Profiler mit kumulierten Hauptläufen, calc_v-Aufschlüsselung und CSV-Export.
+
+
+## Version 2.8
+
+Beschleunigt die Online-Wetter-/Luftdichteauswertung durch einmalig vorbereitete numerische Arrays und direkte Interpolation. Die simulierte Zeit pro Streckenpunkt bleibt Grundlage der Wetterwerte; es wird keine feste Luftdichte pro Streckenpunkt angenommen.
