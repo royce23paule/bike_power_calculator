@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7
+- Kumuliertes Profil über alle FIT-Hauptläufe
+- Konvergenztabelle mit NP, AP, Geschwindigkeit, CdA, Glättung und fNP
+- Deep Profiling von calc_v()
+- Statistik der analytischen kubischen Lösungszweige
+- CSV-Export der Profilergebnisse
+- Keine Änderung der Berechnungslogik
+
+
 ## 2.6.1
 - Behoben: `NameError` für `_kernel_profile`
 - Profiler-Speicher liegt jetzt auf Modulebene und wird pro Lauf zurückgesetzt

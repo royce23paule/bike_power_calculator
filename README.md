@@ -43,3 +43,7 @@ Behoben:
 
 Diese Version enthält ausschließlich detailliertes Rechenkern-Profiling.
 Im Entwicklermodus werden Zeit, Aufrufszahl und mittlere Dauer pro Aufruf angezeigt.
+
+
+## Version 2.7
+Deep Profiler mit kumulierten Hauptläufen, calc_v-Aufschlüsselung und CSV-Export.

@@ -14,8 +14,15 @@ import time
 _kernel_profile = {
     'sections': {},
     'calls': {},
-    'meta': {}
+    'meta': {},
+    'runs': [],
+    'calc_v': {
+        'sections': {},
+        'calls': {},
+        'branches': {'delta_ge_0': 0, 'delta_lt_0': 0}
+    }
 }
+_kernel_run_context = {'type': 'Hauptlauf'}
 import folium #conda install -c conda-forge folium
 import webbrowser
 from scipy import fftpack
@@ -441,7 +448,7 @@ def Find_Index_Close(a,v): #Find the position p, where the value v has the close
     
 #-----------------------------------------------------------------------------------------------------------------------------------------
 def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,eta_,cr_dyn_,cr_,cdA_Hill_,FTP_,power_max_liste_,NP_Soll_,pol_a0_,pol_grade_max_,power_min_,pol_grade_min_,dir_w_,v_w0_,T_Luft_,GPX_File_,Hoehengewinn_Soll_,Steigung_max_min_,sigma_filter_,x_Achse_,Histogram_Anz_Teilungen_,Gaus_Filter_,moving_ave_filter_,Open_HTML_Map_,Show_km_Markers_,Show_Plots_in_Run_,Use_AdvWeather_,API_Weather_,API_StratTime_,Wetterdatei_,Winddamping_,Anmerkungen,Speed_Soll,Start_Distance_,End_Distance_,Generate_PDF=True,Generate_HTML_Map=True):
-    global _kernel_profile
+    global _kernel_profile, _kernel_run_context
     global power_max,m_sys,m_r,m_b
     global cdA_Hill_Grade,cdA_Flat,Draft_Save_Grade,Draft_Save,eta,cr_dyn,cr,cdA_Hill,FTP
     global power_max_liste,NP_Soll,pol_a0,pol_grade_max,power_min,pol_grade_min
@@ -457,8 +464,15 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     _kernel_profile.update({
         'sections': {},
         'calls': {},
-        'meta': {}
+        'meta': {},
+        'runs': [],
+        'calc_v': {
+            'sections': {},
+            'calls': {},
+            'branches': {'delta_ge_0': 0, 'delta_lt_0': 0}
+        }
     })
+    _kernel_run_context = {'type': 'Hauptlauf'}
     _profile_last = time.perf_counter()
 
     def _profile_mark(name):
@@ -549,6 +563,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
             f_cdA=((pos[n-1]/t_cumm[n-1]*3600)/Speed_Soll)**3
             cdA_Flat=f_cdA*cdA_Flat
             print('Start Iteration mit Speed = ',pos[n-1]/t_cumm[n-1]*3600,' und f_cdA = ',f_cdA)
+            _kernel_run_context={'type':'FIT CdA Iteration','n_smoothing':globals().get('n_moving_ave_AP_fit'),'f_np':globals().get('f_NP_Soll'),'target_np':NP_Soll}
             bike_power_calc(0)
             residuum_Speed=(pos[n-1]/t_cumm[n-1]*3600)-Speed_Soll
             print('Ende Iteration mit Speed = ',pos[n-1]/t_cumm[n-1]*3600,' und f_cdA = ',f_cdA)
@@ -1150,13 +1165,15 @@ def smooth_height_data():
         plt.close()        
         
 def bike_power_main_calc(Power_fit_Input):
-    global _kernel_profile
+    global _kernel_profile, _kernel_run_context
     global t,power,tP4,t_cumm,grade,v,P_r_rel,P_g_rel,P_l_rel,NP,AP,P_ges,P_Save,cdA_List,rho_List,v_w_List
-    _kernel_profile['sections'] = {}
-    _kernel_profile['calls'] = {}
-    _kernel_profile['meta'] = {}
+    _run_sections = {}
+    _run_calls = {}
+    _run_context = dict(_kernel_run_context) if isinstance(_kernel_run_context, dict) else {'type': str(_kernel_run_context)}
 
     def _kp_add(name, elapsed, calls=1):
+        _run_sections[name] = _run_sections.get(name, 0.0) + elapsed
+        _run_calls[name] = _run_calls.get(name, 0) + calls
         _kernel_profile['sections'][name] = _kernel_profile['sections'].get(name, 0.0) + elapsed
         _kernel_profile['calls'][name] = _kernel_profile['calls'].get(name, 0) + calls
 
@@ -1199,6 +1216,7 @@ def bike_power_main_calc(Power_fit_Input):
         _kp_t0 = time.perf_counter()
         t_tmp = ((pos[i]-pos[i-1])*1000) / v_b
         _kp_add('Zeitinkrement berechnen', time.perf_counter()-_kp_t0)
+        _kp_t0 = time.perf_counter()
         t_cumm.append(t_cumm[i-1]+t_tmp) 
         #vmean_cumm = pos[i] / (t_cumm[i]/3600)
         P_r_dyn = f_r_dyn*v_b**2
@@ -1212,6 +1230,8 @@ def bike_power_main_calc(Power_fit_Input):
             P_Save_tmp = (cdA_Hill - cdA) * (100/eta * 0.5 * rho * (v_b + v_w)**2 * v_b)
         else:
             P_Save_tmp = (cdA_Flat - cdA) * (100/eta * 0.5 * rho * (v_b + v_w)**2 * v_b)
+        _kp_add('Leistungsanteile/Physik nach calc_v', time.perf_counter()-_kp_t0)
+        _kp_t0 = time.perf_counter()
         #übrige Arrays erstellen
         grade.append(grade_tmp)
         power.append(power_tmp)
@@ -1226,6 +1246,7 @@ def bike_power_main_calc(Power_fit_Input):
         P_Save.append(P_Save_tmp)
         rho_List.append(rho)
         v_w_List.append(v_w*3.6)
+        _kp_add('Listen/Speichern', time.perf_counter()-_kp_t0)
 
     # AP und NP werden nur für das Endergebnis dieses vollständigen Laufs
     # benötigt. Die bisherige Berechnung nach jedem einzelnen FIT-/GPX-Punkt
@@ -1233,6 +1254,7 @@ def bike_power_main_calc(Power_fit_Input):
     # dieselben finalen Summen verwendet werden. Die Formeln und Arrays bleiben
     # unverändert; sie werden lediglich einmal nach Abschluss der Schleife
     # ausgewertet.
+    _kp_t0 = time.perf_counter()
     n=len(t)
     sum_t=np.sum(t[1:n])
     if sum_t > 0:
@@ -1241,6 +1263,29 @@ def bike_power_main_calc(Power_fit_Input):
     else:
         NP=0
         AP=0
+    _kp_add('AP/NP final berechnen', time.perf_counter()-_kp_t0)
+
+    _run_total = time.perf_counter() - _kp_total_start
+    _kernel_profile['sections']['bike_power_main_calc gesamt'] = _kernel_profile['sections'].get('bike_power_main_calc gesamt', 0.0) + _run_total
+    _kernel_profile['calls']['bike_power_main_calc gesamt'] = _kernel_profile['calls'].get('bike_power_main_calc gesamt', 0) + 1
+    _kernel_profile['meta']['points_per_run'] = max(0, len(pos)-1)
+    _kernel_profile['meta']['run_count'] = len(_kernel_profile['runs']) + 1
+    _run_record = {
+        'run': len(_kernel_profile['runs']) + 1,
+        'type': _run_context.get('type', 'Hauptlauf'),
+        'time_s': _run_total,
+        'points': max(0, len(pos)-1),
+        'n_smoothing': _run_context.get('n_smoothing'),
+        'f_np': _run_context.get('f_np'),
+        'target_np': _run_context.get('target_np'),
+        'np_w': float(NP),
+        'ap_w': float(AP),
+        'speed_kmh': float(pos[-1]/t_cumm[-1]*3600) if len(pos)>0 and t_cumm[-1] else None,
+        'cda_flat': float(cdA_Flat),
+        'sections': _run_sections,
+        'calls': _run_calls,
+    }
+    _kernel_profile['runs'].append(_run_record)
 
 def bike_power_calc(NP_Soll):
     if Use_GPX_Input:
@@ -1304,15 +1349,17 @@ def Create_Init_Parameter_File_fit(file,n_moving_ave_AP_fit_,f_NP_Soll_):
         json.dump(data, f)        
 
 def bike_power_calc_FIT(NP_Soll):
-    global pol_a1p,pol_a1m,pol_a0,n_moving_ave_AP_fit,f_NP_Soll
+    global pol_a1p,pol_a1m,pol_a0,n_moving_ave_AP_fit,f_NP_Soll, _kernel_run_context
     pol_a1p = (power_max-pol_a0)/pol_grade_max
     pol_a1m = (power_min-pol_a0)/pol_grade_min
     if NP_Soll<0:
         Power_fit_Input=Power_fit
+        _kernel_run_context={'type':'FIT ohne NP/AP-Kalibrierung','n_smoothing':None,'f_np':1.0,'target_np':NP_Soll}
         bike_power_main_calc(Power_fit_Input)        
     elif NP_Soll==0:
 #        print('Erneuter Aufruf ohne NP & AP Iteration mit n_moving_ave_AP_fit =',n_moving_ave_AP_fit,' und f_NP_Soll = ',f_NP_Soll)
         Power_fit_Input=np.array(moving_ave(Power_fit,n_moving_ave_AP_fit))*f_NP_Soll
+        _kernel_run_context={'type':'FIT CdA-/Final-Lauf','n_smoothing':n_moving_ave_AP_fit,'f_np':f_NP_Soll,'target_np':NP_Soll}
         bike_power_main_calc(Power_fit_Input)
     else:
         Init_Parameter_File_fit=GPX_File[0:GPX_File.rfind("/")]+'/Initial_Parameter_fit.j'
@@ -1389,6 +1436,7 @@ def bike_power_calc_FIT(NP_Soll):
             return min(candidates,key=lambda n: abs(NP_Soll*_fit_ap_np_ratio(n)+correction-pol_a0))
 
         Power_fit_Input=_fit_smoothed(n_moving_ave_AP_fit)*f_NP_Soll
+        _kernel_run_context={'type':'FIT NP/AP Initiallauf','n_smoothing':n_moving_ave_AP_fit,'f_np':f_NP_Soll,'target_np':NP_Soll}
         bike_power_main_calc(Power_fit_Input)
         residuum=NP-NP_Soll
         residuumAP=AP-pol_a0
@@ -1402,6 +1450,7 @@ def bike_power_calc_FIT(NP_Soll):
                 f_NP_Soll=f_NP_Soll*NP_Soll/NP
             Power_fit_Input=_fit_smoothed(n_moving_ave_AP_fit)*f_NP_Soll
             print('vor Iteration Anpassen NP & AP',NP,AP,n_moving_ave_AP_fit)
+            _kernel_run_context={'type':f'FIT NP/AP Iteration {_fit_iteration}','n_smoothing':n_moving_ave_AP_fit,'f_np':f_NP_Soll,'target_np':NP_Soll}
             bike_power_main_calc(Power_fit_Input)
             print('nach Iteration Anpassen NP & AP',NP,AP,n_moving_ave_AP_fit)
             residuum=NP-NP_Soll
@@ -1436,11 +1485,28 @@ def bike_power_calc_FIT(NP_Soll):
             
 def calc_v(power_tmp,grade_tmp,h_mean,direction_tmp,dir_w,v_w0,ResetStandardWeather):
     global f_r_dyn,f_r,f_g,cdA,rho,v_w
+    global _kernel_profile
+
+    _cv_profile = _kernel_profile.setdefault('calc_v', {'sections': {}, 'calls': {}, 'branches': {'delta_ge_0': 0, 'delta_lt_0': 0}})
+    _cv_sections = _cv_profile.setdefault('sections', {})
+    _cv_calls = _cv_profile.setdefault('calls', {})
+    _cv_branches = _cv_profile.setdefault('branches', {'delta_ge_0': 0, 'delta_lt_0': 0})
+
+    def _cv_add(name, elapsed):
+        _cv_sections[name] = _cv_sections.get(name, 0.0) + elapsed
+        _cv_calls[name] = _cv_calls.get(name, 0) + 1
+
+    _cv_total_start = time.perf_counter()
     v_w0_0=v_w0
-    dir_w_0=dir_w    
+    dir_w_0=dir_w
+
+    _t0=time.perf_counter()
     beta = atan(grade_tmp/100)
     cdA=calc_cdA(grade_tmp,cdA_Hill_Grade,cdA_Hill,cdA_Flat,Draft_Save_Grade,Draft_Save)
-    if not ResetStandardWeather: cdA_List.append(cdA) #cdA Liste wird nur gefüllt wenn der Aufruf aus dem Hauptprogramm erfolgt ist
+    if not ResetStandardWeather: cdA_List.append(cdA)
+    _cv_add('Geometrie/CdA', time.perf_counter()-_t0)
+
+    _t0=time.perf_counter()
     if Use_AdvWeather:
         rho = calc_rho_advanced(t_cumm)
         v_w0=AdvWeather_AirSpeed[-1]
@@ -1449,14 +1515,20 @@ def calc_v(power_tmp,grade_tmp,h_mean,direction_tmp,dir_w,v_w0,ResetStandardWeat
         rho = calc_rho(T_Luft,h_mean)
     if ResetStandardWeather:
         v_w0=v_w0_0
-        dir_w=dir_w_0        
-    v_w=-cos((dir_w-direction_tmp)*deg2rad)*v_w0*Winddamping /3.6 #m/s
+        dir_w=dir_w_0
+    _cv_add('Wetter/Luftdichte', time.perf_counter()-_t0)
+
+    _t0=time.perf_counter()
+    v_w=-cos((dir_w-direction_tmp)*deg2rad)*v_w0*Winddamping /3.6
     f_r_dyn = 100/eta * cr_dyn * cos(beta)
     f_r = 100/eta * cr * m_sys * g * cos(beta)
     f_g = 100/eta * m_sys * g * sin(beta)
     f_l_0 = 100/eta * 0.5 * cdA * rho * v_w**2
     f_l_1 = 100/eta * cdA * rho * v_w
     f_l_2 = 100/eta * 0.5 * cdA * rho
+    _cv_add('Wind/Widerstandskoeffizienten', time.perf_counter()-_t0)
+
+    _t0=time.perf_counter()
     aa = f_l_2
     bb = f_l_1 + f_r_dyn
     cc = f_l_0 + f_g + f_r
@@ -1467,13 +1539,21 @@ def calc_v(power_tmp,grade_tmp,h_mean,direction_tmp,dir_w,v_w0,ResetStandardWeat
     p = b - a**2 / 3
     q = 2*a**3/27 - a*b/3+c
     DELTA = (q / 2)**2 + (p / 3)**3
+    _cv_add('Kubische Gleichung aufbauen', time.perf_counter()-_t0)
+
+    _t0=time.perf_counter()
     if DELTA >= 0:
-        uu = copysign(1,(-q / 2 + sqrt(DELTA))) * fabs(-q / 2 + sqrt(DELTA))**(1/3)
-        vv = copysign(1,(-q / 2 - sqrt(DELTA))) * fabs(-q / 2 - sqrt(DELTA))**(1/3)
+        _cv_branches['delta_ge_0'] = _cv_branches.get('delta_ge_0', 0) + 1
+        sqrt_delta=sqrt(DELTA)
+        uu = copysign(1,(-q / 2 + sqrt_delta)) * fabs(-q / 2 + sqrt_delta)**(1/3)
+        vv = copysign(1,(-q / 2 - sqrt_delta)) * fabs(-q / 2 - sqrt_delta)**(1/3)
         v_b = (uu + vv - (bb / (3*aa)))
     else:
+        _cv_branches['delta_lt_0'] = _cv_branches.get('delta_lt_0', 0) + 1
         v_b = sqrt(-4/3*p)*cos(1/3*acos(-q/2*sqrt(-27/(p**3))))-bb/(3*aa)
-    return v_b    
+    _cv_add('Analytische kubische Lösung', time.perf_counter()-_t0)
+    _cv_add('calc_v gesamt intern', time.perf_counter()-_cv_total_start)
+    return v_b
 
 def print_statistics(i,New_v_ave,output):
     global tab1,cal_consumption

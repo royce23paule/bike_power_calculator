@@ -816,42 +816,73 @@ def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[st
 
 
 def render_kernel_profile(result: dict) -> None:
-    kernel = result.get("kernel_profile")
+    kernel = result.get('kernel_profile')
     if not isinstance(kernel, dict):
         return
 
-    sections = kernel.get("sections", {})
-    calls = kernel.get("calls", {})
-    meta = kernel.get("meta", {})
-    if not sections:
-        return
+    sections = kernel.get('sections', {})
+    calls = kernel.get('calls', {})
+    meta = kernel.get('meta', {})
+    runs = kernel.get('runs', [])
+    calc_v = kernel.get('calc_v', {})
 
-    rows = []
-    for name, seconds in sections.items():
-        count = int(calls.get(name, 0))
-        rows.append({
-            "Abschnitt": name,
-            "Zeit [s]": float(seconds),
-            "Aufrufe": count,
-            "ms/Aufruf": (float(seconds) * 1000 / count) if count else None,
-        })
+    st.subheader('Deep Profiler')
+    cols = st.columns(4)
+    cols[0].metric('Vollständige Rechenläufe', len(runs))
+    cols[1].metric('Punkte je Lauf', meta.get('points_per_run', '—'))
+    total = sections.get('bike_power_main_calc gesamt')
+    cols[2].metric('Hauptläufe kumuliert', '—' if total is None else f'{total:.2f} s')
+    cv_total = calc_v.get('sections', {}).get('calc_v gesamt intern')
+    cols[3].metric('calc_v kumuliert', '—' if cv_total is None else f'{cv_total:.2f} s')
 
-    df = pd.DataFrame(rows).sort_values("Zeit [s]", ascending=False)
+    if runs:
+        run_rows=[]
+        for run in runs:
+            run_rows.append({
+                'Lauf': run.get('run'),
+                'Typ': run.get('type'),
+                'Zeit [s]': run.get('time_s'),
+                'Punkte': run.get('points'),
+                'Glättung n': run.get('n_smoothing'),
+                'fNP': run.get('f_np'),
+                'NP [W]': run.get('np_w'),
+                'AP [W]': run.get('ap_w'),
+                'Speed [km/h]': run.get('speed_kmh'),
+                'CdA flach': run.get('cda_flat'),
+            })
+        df_runs=pd.DataFrame(run_rows)
+        st.markdown('#### Einzelne Hauptläufe / Konvergenz')
+        st.dataframe(df_runs, use_container_width=True, hide_index=True)
+        st.download_button('Hauptläufe als CSV herunterladen', df_runs.to_csv(index=False).encode('utf-8'), 'profiling_runs.csv', 'text/csv')
 
-    st.subheader("Rechenkern-Performance")
-    cols = st.columns(3)
-    cols[0].metric("Berechnungspunkte", meta.get("points", "—"))
-    cols[1].metric("Gemessene Abschnitte", len(df))
-    total = sections.get("bike_power_main_calc gesamt")
-    cols[2].metric("Hauptlauf intern", "—" if total is None else f"{total:.2f} s")
+    if sections:
+        rows=[]
+        for name, seconds in sections.items():
+            count=int(calls.get(name,0))
+            rows.append({'Abschnitt':name,'Zeit [s]':float(seconds),'Aufrufe':count,'ms/Aufruf':(float(seconds)*1000/count) if count else None})
+        df=pd.DataFrame(rows).sort_values('Zeit [s]',ascending=False)
+        st.markdown('#### Kumuliertes Profil aller Hauptläufe')
+        st.dataframe(df,use_container_width=True,hide_index=True)
+        st.download_button('Kumuliertes Profil als CSV herunterladen',df.to_csv(index=False).encode('utf-8'),'profiling_kernel.csv','text/csv')
+        top=df[df['Abschnitt']!='bike_power_main_calc gesamt'].head(5)
+        if not top.empty: st.bar_chart(top.set_index('Abschnitt')['Zeit [s]'])
 
-    st.dataframe(df, use_container_width=True, hide_index=True)
-
-    top = df[df["Abschnitt"] != "bike_power_main_calc gesamt"].head(5)
-    if not top.empty:
-        st.caption("Top 5 Zeitfresser")
-        st.bar_chart(top.set_index("Abschnitt")["Zeit [s]"])
-
+    cv_sections=calc_v.get('sections',{})
+    cv_calls=calc_v.get('calls',{})
+    branches=calc_v.get('branches',{})
+    if cv_sections:
+        cv_rows=[]
+        for name,seconds in cv_sections.items():
+            count=int(cv_calls.get(name,0))
+            cv_rows.append({'calc_v Abschnitt':name,'Zeit [s]':float(seconds),'Aufrufe':count,'ms/Aufruf':(float(seconds)*1000/count) if count else None})
+        df_cv=pd.DataFrame(cv_rows).sort_values('Zeit [s]',ascending=False)
+        st.markdown('#### Deep Profiling von calc_v()')
+        st.dataframe(df_cv,use_container_width=True,hide_index=True)
+        b1,b2=st.columns(2)
+        b1.metric('Kubischer Zweig Δ ≥ 0',int(branches.get('delta_ge_0',0)))
+        b2.metric('Kubischer Zweig Δ < 0',int(branches.get('delta_lt_0',0)))
+        st.caption('calc_v löst die Geschwindigkeit analytisch über eine kubische Gleichung; es gibt keinen iterativen Solver.')
+        st.download_button('calc_v Profil als CSV herunterladen',df_cv.to_csv(index=False).encode('utf-8'),'profiling_calc_v.csv','text/csv')
 
 def main() -> None:
     init_session_state()
