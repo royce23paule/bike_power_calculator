@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.9.1
+- FIT-Cache-Debugausgabe ergänzt
+- Anzeige von Hash, Pfad, Existenz, Lese-, Schreib- und Parsingzeit
+- Entwickleransicht für FIT-Cache-Diagnose
+- Keine Änderung der Berechnungslogik
+
+
+## 2.9
+- Inhaltsbasierter FIT-Parsing-Cache
+- Cache berücksichtigt FIT-Datei sowie Start-/Enddistanz
+- Wiederholungsberechnungen laden vorbereitete Arrays direkt aus `.npz`
+- Cache-Treffer wird im Log und Entwicklerprofil angezeigt
+- Keine Änderung der Rechenphysik
+
+
 ## 2.8
 - Online-Wetterinterpolation auf vorbereitete NumPy-Arrays umgestellt
 - Direkte O(1)-Indexberechnung statt wiederholter Datetime-Suche

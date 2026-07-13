@@ -52,3 +52,11 @@ Deep Profiler mit kumulierten Hauptläufen, calc_v-Aufschlüsselung und CSV-Expo
 ## Version 2.8
 
 Beschleunigt die Online-Wetter-/Luftdichteauswertung durch einmalig vorbereitete numerische Arrays und direkte Interpolation. Die simulierte Zeit pro Streckenpunkt bleibt Grundlage der Wetterwerte; es wird keine feste Luftdichte pro Streckenpunkt angenommen.
+
+
+## Version 2.9
+
+FIT-Dateien werden nach dem ersten erfolgreichen Import anhand ihres Inhalts
+sowie des gewählten Distanzbereichs zwischengespeichert. Wiederholungsberechnungen
+mit derselben Datei laden die vorbereiteten Strecken-, Höhen-, Leistungs- und
+GPS-Arrays direkt aus dem Cache.

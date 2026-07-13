@@ -39,6 +39,8 @@ import os
 import csv
 from pathlib import Path
 import json
+import hashlib
+import tempfile
 from matplotlib.collections import LineCollection
 from matplotlib.colors import ListedColormap, BoundaryNorm
 import matplotlib.dates as mdates
@@ -72,6 +74,58 @@ _weather_start_offset_seconds = None
 _weather_fast_cache_hits = 0
 _weather_fast_cache_misses = 0
 _weather_exact_cache = {}
+
+
+# FIT-Parsing-Cache. Der Cache-Schlüssel basiert auf dem Dateiinhalt sowie
+# Start-/Enddistanz. Dadurch werden identische FIT-Dateien nur einmal geparst.
+_FIT_CACHE_DIR = Path(tempfile.gettempdir()) / "bike_power_calculator_fit_cache"
+_FIT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+FIT_Cache_Hit = False
+FIT_Cache_Key = None
+FIT_Cache_Path = None
+FIT_Cache_Exists_Before = False
+FIT_Cache_Read_s = None
+FIT_Cache_Write_s = None
+FIT_Parse_s = None
+
+
+def _fit_cache_key(file_path, start_distance, end_distance):
+    hasher = hashlib.sha256()
+    with open(file_path, "rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    hasher.update(f"|{start_distance:.6f}|{end_distance:.6f}|v1".encode("utf-8"))
+    return hasher.hexdigest()
+
+
+def _fit_cache_path(cache_key):
+    return _FIT_CACHE_DIR / f"{cache_key}.npz"
+
+
+def _load_fit_cache(cache_path):
+    with np.load(cache_path, allow_pickle=False) as data:
+        return (
+            data["pos"].astype(float).tolist(),
+            data["h_raw"].astype(float).tolist(),
+            data["power_fit"].astype(float).tolist(),
+            data["lat"].astype(float).tolist(),
+            data["lon"].astype(float).tolist(),
+            data["direction"].astype(float).tolist(),
+        )
+
+
+def _save_fit_cache(cache_path, pos_values, height_values, power_values, lat_values, lon_values, direction_values):
+    tmp_path = cache_path.with_suffix(".tmp.npz")
+    np.savez_compressed(
+        tmp_path,
+        pos=np.asarray(pos_values, dtype=float),
+        h_raw=np.asarray(height_values, dtype=float),
+        power_fit=np.asarray(power_values, dtype=float),
+        lat=np.asarray(lat_values, dtype=float),
+        lon=np.asarray(lon_values, dtype=float),
+        direction=np.asarray(direction_values, dtype=float),
+    )
+    tmp_path.replace(cache_path)
 
 
 def _get_weather_cache_session():
@@ -673,6 +727,13 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'weather_api_cache': get_weather_api_cache_info() if API_Weather else None,
         'profile_steps': _profile_steps,
         'kernel_profile': _kernel_profile,
+        'fit_cache_hit': FIT_Cache_Hit,
+        'fit_cache_key': FIT_Cache_Key,
+        'fit_cache_path': FIT_Cache_Path,
+        'fit_cache_exists_before': FIT_Cache_Exists_Before,
+        'fit_cache_read_s': FIT_Cache_Read_s,
+        'fit_cache_write_s': FIT_Cache_Write_s,
+        'fit_parse_s': FIT_Parse_s,
         'weather_interpolation_cache': {'hits': _weather_fast_cache_hits, 'misses': _weather_fast_cache_misses},
     }
     # Zusatzdaten für interaktive Streamlit/Plotly-Diagramme.
@@ -1008,93 +1069,138 @@ def import_gpx_or_fit_file():
         
 def import_fit_file():
     global h_raw,pos,direction,Power_fit
-    
-    #TMP Einschränkung der Distanz
+    global FIT_Cache_Hit,FIT_Cache_Key,FIT_Cache_Path,FIT_Cache_Exists_Before
+    global FIT_Cache_Read_s,FIT_Cache_Write_s,FIT_Parse_s,_kernel_profile
+
+    # TMP Einschränkung der Distanz
     d_start=1000*Start_Distance
     d_end=1000*End_Distance
-    
+
+    FIT_Cache_Key = _fit_cache_key(GPX_File, Start_Distance, End_Distance)
+    cache_path = _fit_cache_path(FIT_Cache_Key)
+    FIT_Cache_Path = str(cache_path)
+    FIT_Cache_Exists_Before = cache_path.exists()
+    FIT_Cache_Read_s = None
+    FIT_Cache_Write_s = None
+    FIT_Parse_s = None
+
+    print("FIT Cache Debug:")
+    print("  Key:", FIT_Cache_Key)
+    print("  Pfad:", FIT_Cache_Path)
+    print("  Vorher vorhanden:", FIT_Cache_Exists_Before)
+
+    if cache_path.exists():
+        try:
+            _fit_read_start = time.perf_counter()
+            pos,h_raw,Power_fit,lat2,lon2,direction = _load_fit_cache(cache_path)
+            FIT_Cache_Read_s = time.perf_counter() - _fit_read_start
+            FIT_Cache_Hit = True
+            print("FIT Cache Treffer:", FIT_Cache_Key[:12])
+            print("  Lesezeit [s]:", FIT_Cache_Read_s)
+            print("  Punkte:", len(pos))
+            try:
+                _kernel_profile.setdefault('meta', {})['fit_cache_hit'] = True
+                _kernel_profile['meta']['fit_cache_key'] = FIT_Cache_Key[:12]
+                _kernel_profile['meta']['fit_points'] = len(pos)
+            except Exception:
+                pass
+            return lat2,lon2
+        except Exception as exc:
+            print("FIT Cache konnte nicht gelesen werden, Datei wird neu geparst:", exc)
+            try:
+                cache_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    FIT_Cache_Hit = False
+    print("FIT Cache Miss:", FIT_Cache_Key[:12])
+    _fit_parse_start = time.perf_counter()
+
     fitfile = FitFile(GPX_File)
     elevation=[]
     distance=[]
     power=[]
     lat=[]
     lon=[]
-    
-#Beispiel für einen Eintrag in record_data     
-#accumulated_power: 1741325 [watts]
-#altitude: 3026
-#cadence: 0 [rpm]
-#distance: 83531.68 [m]
-#enhanced_altitude: 105.20000000000005 [m]
-#enhanced_speed: 6.252 [m/s]
-#fractional_cadence: 0.0 [rpm]
-#heart_rate: 131 [bpm]
-#left_pedal_smoothness: None [percent]
-#left_right_balance: 228
-#left_torque_effectiveness: None [percent]
-#position_lat: 613721705 [semicircles]
-#position_long: 84022794 [semicircles]
-#power: 0 [watts]
-#right_pedal_smoothness: None [percent]
-#right_torque_effectiveness: None [percent]
-#speed: 6252
-#temperature: 10 [C]
-#timestamp: 2022-02-27 13:54:28
-#unknown_61: 3015
-#unknown_66: 2420
-#unknown_90: -2
-    
+
     for record in fitfile.get_messages('record'):
         check_sum=0
         for record_data in record:
             if(record_data.name=='enhanced_altitude'):
                 if isinstance(record_data.value, float) or isinstance(record_data.value, int):
-                    ele=record_data.value #m
+                    ele=record_data.value
                     check_sum+=1
             if(record_data.name=='distance'):
                 if isinstance(record_data.value, float) or isinstance(record_data.value, int):
-                    d=record_data.value #m
+                    d=record_data.value
                     if (d>=d_start): check_sum+=1
             if(record_data.name=='power'):
-                if isinstance(record_data.value, float) or isinstance(record_data.value, int): 
-                    p=float(record_data.value)     #W
+                if isinstance(record_data.value, float) or isinstance(record_data.value, int):
+                    p=float(record_data.value)
                     check_sum+=1
             if(record_data.name=='position_lat'):
-                if isinstance(record_data.value, float) or isinstance(record_data.value, int):                  
-                    la=record_data.value *180/(2**31 ) #semicercles to deg
+                if isinstance(record_data.value, float) or isinstance(record_data.value, int):
+                    la=record_data.value *180/(2**31)
                     check_sum+=1
             if(record_data.name=='position_long'):
-                if isinstance(record_data.value, float) or isinstance(record_data.value, int): 
-                    lo=record_data.value *180/(2**31 ) #semicercles to deg
+                if isinstance(record_data.value, float) or isinstance(record_data.value, int):
+                    lo=record_data.value *180/(2**31)
                     check_sum+=1
         if check_sum==5:
-            distance.append(d)  
+            distance.append(d)
             elevation.append(ele)
             power.append(p)
             lat.append(la)
-            lon.append(lo)   
-    
+            lon.append(lo)
+
+    if not distance:
+        raise ValueError("Die FIT-Datei enthält im gewählten Distanzbereich keine vollständigen Datensätze.")
+
     d0=distance[0]
     pos=[0]
     h_raw=[elevation[0]]
     Power_fit=[max(10,power[0])]
     lat2=[lat[0]]
     lon2=[lon[0]]
+
     for i in range(1,len(distance)):
-        #Verhindert, dass Abstand zwischen zwei Punkten sehr klein wird und somit sehr große Gradienten auftreten können
+        # Verhindert sehr kleine Punktabstände und dadurch extreme Gradienten.
         if ((distance[i]-distance[i-1])>5) and (distance[i]<=d_end):
             pos.append((distance[i]-d0)/1000)
             h_raw.append(elevation[i])
             Power_fit.append(max(10,power[i]))
             lat2.append(lat[i])
             lon2.append(lon[i])
-    
+
     direction = [nan]
     n=len(lat2)-1
     for i in range(1,n):
         direction.append(dir_from_lat_lon(lat2[i],lat2[i+1],lon2[i],lon2[i+1])/deg2rad)
     direction.append(dir_from_lat_lon(lat2[n-1],lat2[n],lon2[n-1],lon2[n])/deg2rad)
-    # print_maps()
+
+    FIT_Parse_s = time.perf_counter() - _fit_parse_start
+    print("  Parsingzeit [s]:", FIT_Parse_s)
+    print("  Punkte:", len(pos))
+
+    try:
+        _fit_write_start = time.perf_counter()
+        _save_fit_cache(cache_path, pos, h_raw, Power_fit, lat2, lon2, direction)
+        FIT_Cache_Write_s = time.perf_counter() - _fit_write_start
+        print("FIT Cache gespeichert:", FIT_Cache_Key[:12])
+        print("  Schreibzeit [s]:", FIT_Cache_Write_s)
+        print("  Datei vorhanden nach Schreiben:", cache_path.exists())
+        if cache_path.exists():
+            print("  Dateigröße [Bytes]:", cache_path.stat().st_size)
+    except Exception as exc:
+        print("FIT Cache konnte nicht gespeichert werden:", exc)
+
+    try:
+        _kernel_profile.setdefault('meta', {})['fit_cache_hit'] = False
+        _kernel_profile['meta']['fit_cache_key'] = FIT_Cache_Key[:12]
+        _kernel_profile['meta']['fit_points'] = len(pos)
+    except Exception:
+        pass
+
     return lat2,lon2
 
 def import_gpx_file():

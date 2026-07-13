@@ -884,6 +884,36 @@ def render_kernel_profile(result: dict) -> None:
         st.caption('calc_v löst die Geschwindigkeit analytisch über eine kubische Gleichung; es gibt keinen iterativen Solver.')
         st.download_button('calc_v Profil als CSV herunterladen',df_cv.to_csv(index=False).encode('utf-8'),'profiling_calc_v.csv','text/csv')
 
+
+def render_fit_cache_debug(result: dict) -> None:
+    st.subheader("FIT-Cache-Debug")
+
+    hit = result.get("fit_cache_hit")
+    key = result.get("fit_cache_key")
+    path = result.get("fit_cache_path")
+    exists_before = result.get("fit_cache_exists_before")
+    read_s = result.get("fit_cache_read_s")
+    write_s = result.get("fit_cache_write_s")
+    parse_s = result.get("fit_parse_s")
+
+    cols = st.columns(4)
+    cols[0].metric("Status", "Treffer" if hit else "Miss")
+    cols[1].metric("Vorher vorhanden", "Ja" if exists_before else "Nein")
+    cols[2].metric("Lesezeit", "—" if read_s is None else f"{read_s:.3f} s")
+    cols[3].metric("Parsingzeit", "—" if parse_s is None else f"{parse_s:.3f} s")
+
+    rows = [
+        {"Feld": "Cache-Key", "Wert": key or "—"},
+        {"Feld": "Cache-Pfad", "Wert": path or "—"},
+        {"Feld": "Vorher vorhanden", "Wert": exists_before},
+        {"Feld": "Cache-Treffer", "Wert": hit},
+        {"Feld": "Lesezeit [s]", "Wert": read_s},
+        {"Feld": "Parsingzeit [s]", "Wert": parse_s},
+        {"Feld": "Schreibzeit [s]", "Wert": write_s},
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
 def main() -> None:
     init_session_state()
 
@@ -1056,6 +1086,7 @@ def main() -> None:
     render_results(st.session_state.result, st.session_state.run_log, st.session_state.profile)
     if st.session_state.get("developer_mode", False) and st.session_state.result:
         render_kernel_profile(st.session_state.result)
+        render_fit_cache_debug(st.session_state.result)
 
     if st.session_state.developer_mode:
         render_developer_diagnostics(st.session_state.result, st.session_state.profile)
