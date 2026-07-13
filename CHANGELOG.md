@@ -1,13 +1,13 @@
 # Changelog
 
-## 2.11.1
+## 2.11.2
 - Separater Bereich „Interaktive Diagramme“ entfernt
 - Interaktive Rohdatenansicht entfernt
-- Vollständige interaktive Auswertung bleibt als ein ausklappbarer Gesamtbereich
-- Diagramme und Tabellen innerhalb des Bereichs direkt sichtbar
-- Berechnungslog als ausklappbarer Bereich
+- Vollständige Auswertung als ein ausklappbarer Gesamtbereich
+- Diagramme und Tabellen innerhalb direkt sichtbar
+- Berechnungslog ausklappbar
 - PDF standardmäßig deaktiviert
-- PDF- und Karten-Vorschau nur bei vorhandener Ausgabe ausklappbar
+- Renderer-Funktionen vollständig erhalten
 
 
 ## 2.11

@@ -338,6 +338,130 @@ def render_interactive_charts(result: dict[str, Any]) -> None:
     with st.expander("Vollständige interaktive Auswertung anzeigen", expanded=False):
         render_full_interactive_report(result)
 
+
+def _unique_dataframe_columns(columns: list[str]) -> list[str]:
+    counts: dict[str, int] = {}
+    result = []
+    for index, column in enumerate(columns):
+        name = str(column).strip() or f"Spalte {index + 1}"
+        counts[name] = counts.get(name, 0) + 1
+        if counts[name] > 1:
+            name = f"{name} ({counts[name]})"
+        result.append(name)
+    return result
+
+
+def render_serialized_report_chart(item: dict[str, Any]) -> None:
+    series = item.get("series")
+    if not isinstance(series, list) or not series:
+        st.info("Keine darstellbaren Diagrammdaten vorhanden.")
+        return
+
+    secondary_axis = any(int(entry.get("axis", 0)) > 0 for entry in series)
+    figure = make_subplots(specs=[[{"secondary_y": secondary_axis}]])
+    primary_label = None
+    secondary_label = None
+
+    for entry in series:
+        x_values = entry.get("x", [])
+        y_values = entry.get("y", [])
+        if not x_values or not y_values:
+            continue
+
+        secondary = int(entry.get("axis", 0)) > 0
+        y_label = entry.get("y_label") or "Wert"
+        if secondary:
+            secondary_label = secondary_label or y_label
+        else:
+            primary_label = primary_label or y_label
+
+        if entry.get("type") == "bar":
+            trace = go.Bar(x=x_values, y=y_values, name=entry.get("name", "Verteilung"))
+        else:
+            trace = go.Scatter(
+                x=x_values,
+                y=y_values,
+                mode="lines",
+                name=entry.get("name", "Wert"),
+            )
+        figure.add_trace(trace, secondary_y=secondary)
+
+    figure.update_layout(
+        title=item.get("title", "Diagramm"),
+        xaxis_title=item.get("x_label", ""),
+        hovermode="x unified",
+        legend_title="Kurven",
+        height=520,
+    )
+    if primary_label:
+        figure.update_yaxes(title_text=primary_label, secondary_y=False)
+    if secondary_axis and secondary_label:
+        figure.update_yaxes(title_text=secondary_label, secondary_y=True)
+    st.plotly_chart(figure, use_container_width=True)
+
+
+def render_serialized_report_table(item: dict[str, Any]) -> None:
+    rows = item.get("rows", [])
+    columns = item.get("columns", [])
+    if not rows:
+        st.info("Keine Tabellendaten vorhanden.")
+        return
+
+    width = max(len(row) for row in rows)
+    normalized = [list(row) + [""] * (width - len(row)) for row in rows]
+    first_row = normalized[0]
+    use_header = (
+        len(normalized) > 1
+        and all(str(value).strip() for value in first_row)
+        and any(not str(value).replace(".", "", 1).replace("-", "", 1).isdigit() for value in first_row)
+    )
+
+    if use_header:
+        dataframe_columns = _unique_dataframe_columns([str(value) for value in first_row])
+        dataframe_rows = normalized[1:]
+    else:
+        if len(columns) != width:
+            columns = [f"Spalte {index + 1}" for index in range(width)]
+        dataframe_columns = _unique_dataframe_columns(columns)
+        dataframe_rows = normalized
+
+    st.dataframe(
+        pd.DataFrame(dataframe_rows, columns=dataframe_columns),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def render_full_interactive_report(result: dict[str, Any]) -> None:
+    items = result.get("interactive_report_items")
+    if not isinstance(items, list) or not items:
+        st.info("Für diesen Lauf wurden keine vollständigen Reportdaten bereitgestellt.")
+        return
+
+    chart_count = sum(1 for item in items if item.get("kind") == "chart")
+    table_count = sum(1 for item in items if item.get("kind") == "table")
+    st.caption(
+        f"{chart_count} interaktive Diagramme und "
+        f"{table_count} Tabellen aus dem PDF-Report."
+    )
+
+    for index, item in enumerate(items):
+        title = item.get("title") or f"Auswertung {index + 1}"
+        kind = item.get("kind")
+
+        st.markdown(f"### {title}")
+
+        if kind == "chart":
+            render_serialized_report_chart(item)
+        elif kind == "table":
+            render_serialized_report_table(item)
+        else:
+            st.info(item.get("text", "Keine Darstellung verfügbar."))
+
+        if index < len(items) - 1:
+            st.divider()
+
+
 def format_seconds(value: float | None) -> str:
     if value is None:
         return "—"
