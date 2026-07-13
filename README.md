@@ -60,3 +60,8 @@ FIT-Dateien werden nach dem ersten erfolgreichen Import anhand ihres Inhalts
 sowie des gewählten Distanzbereichs zwischengespeichert. Wiederholungsberechnungen
 mit derselben Datei laden die vorbereiteten Strecken-, Höhen-, Leistungs- und
 GPS-Arrays direkt aus dem Cache.
+
+
+## Version 2.10
+
+FIT-basierte CdA-Kalibrierungen zeigen CdA, AP, NP, Geschwindigkeit, Kalibrierungsfaktor und Konvergenzstatus direkt in der Streamlit-App. Ein PDF ist nicht mehr erforderlich.

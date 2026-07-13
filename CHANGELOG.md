@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.10
+- Direkte CdA-Kalibrierungsübersicht in der App
+- Anzeige von CdA, AP, NP, Geschwindigkeit, fNP, Moving-Average-Wert und Laufanzahl
+- Soll/Ist-Vergleich mit Toleranzstatus
+- FIT-Kalibrierung ohne PDF vollständig auswertbar
+- Keine Änderung der Berechnungsphysik
+
+
 ## 2.9.1
 - FIT-Cache-Debugausgabe ergänzt
 - Anzeige von Hash, Pfad, Existenz, Lese-, Schreib- und Parsingzeit

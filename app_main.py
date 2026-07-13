@@ -914,6 +914,61 @@ def render_fit_cache_debug(result: dict) -> None:
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
+def render_cda_calibration_summary(result: dict, config: dict) -> None:
+    """Kompakte Ergebnisübersicht für FIT-basierte CdA-Kalibrierungen."""
+    cda = result.get("calibration_cda")
+    ap = result.get("calibration_ap")
+    np_value = result.get("calibration_np")
+    speed = result.get("calibration_speed_kmh")
+    target_speed = result.get("calibration_target_speed_kmh")
+    target_np = result.get("calibration_target_np")
+    target_ap = result.get("calibration_target_ap")
+    f_np = result.get("calibration_f_np")
+    moving_average = result.get("calibration_moving_average")
+    runs = result.get("calibration_runs")
+
+    try:
+        if target_np is None:
+            target_np = float(config.get("Normalized Power Sollwert [W]"))
+    except Exception:
+        pass
+    try:
+        if target_ap is None:
+            target_ap = float(config.get("Leistung bei 0% Steigung [W]"))
+    except Exception:
+        pass
+
+    st.subheader("CdA-Kalibrierung")
+    cols = st.columns(5)
+    cols[0].metric("CdA berechnet", "—" if cda is None else f"{float(cda):.5f}")
+    cols[1].metric("Average Power", "—" if ap is None else f"{float(ap):.2f} W")
+    cols[2].metric("Normalized Power", "—" if np_value is None else f"{float(np_value):.2f} W")
+    cols[3].metric("Ø Geschwindigkeit", "—" if speed is None else f"{float(speed):.3f} km/h")
+    cols[4].metric("Hauptläufe", "—" if runs is None else int(runs))
+
+    def delta(current, target):
+        if current is None or target is None:
+            return None
+        return float(current) - float(target)
+
+    speed_delta = delta(speed, target_speed)
+    ap_delta = delta(ap, target_ap)
+    np_delta = delta(np_value, target_np)
+    rows = [
+        {"Größe":"Durchschnittsgeschwindigkeit","Soll":target_speed,"Ist":speed,"Abweichung":speed_delta,"Toleranz":0.01,"Status":"✅" if speed_delta is not None and abs(speed_delta)<=0.01 else "⚠️"},
+        {"Größe":"Average Power","Soll":target_ap,"Ist":ap,"Abweichung":ap_delta,"Toleranz":0.1,"Status":"✅" if ap_delta is not None and abs(ap_delta)<=0.1 else "⚠️"},
+        {"Größe":"Normalized Power","Soll":target_np,"Ist":np_value,"Abweichung":np_delta,"Toleranz":0.1,"Status":"✅" if np_delta is not None and abs(np_delta)<=0.1 else "⚠️"},
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    dcols = st.columns(3)
+    dcols[0].metric("fNP", "—" if f_np is None else f"{float(f_np):.6f}")
+    dcols[1].metric("Moving Average n", "—" if moving_average is None else int(moving_average))
+    dcols[2].metric("FIT-Cache", "Treffer" if result.get("fit_cache_hit") else "Miss")
+    if all(row["Status"]=="✅" for row in rows):
+        st.success("CdA-Kalibrierung erfolgreich: Geschwindigkeit, AP und NP liegen innerhalb der Toleranzen.")
+    else:
+        st.warning("Kalibrierung abgeschlossen, aber mindestens ein Zielwert liegt außerhalb der Toleranz.")
+
 def main() -> None:
     init_session_state()
 
@@ -1084,6 +1139,8 @@ def main() -> None:
                     st.code(st.session_state.run_log)
 
     render_results(st.session_state.result, st.session_state.run_log, st.session_state.profile)
+    if st.session_state.result:
+        render_cda_calibration_summary(st.session_state.result, st.session_state.config)
     if st.session_state.get("developer_mode", False) and st.session_state.result:
         render_kernel_profile(st.session_state.result)
         render_fit_cache_debug(st.session_state.result)
