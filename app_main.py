@@ -920,12 +920,24 @@ def render_cda_calibration_summary(result: dict, config: dict) -> None:
     ap = result.get("calibration_ap")
     np_value = result.get("calibration_np")
     speed = result.get("calibration_speed_kmh")
+    if speed is None:
+        speed = result.get("average_speed_kmh")
+
     target_speed = result.get("calibration_target_speed_kmh")
     target_np = result.get("calibration_target_np")
     target_ap = result.get("calibration_target_ap")
     f_np = result.get("calibration_f_np")
     moving_average = result.get("calibration_moving_average")
     runs = result.get("calibration_runs")
+
+    if runs is None:
+        run_rows = result.get("run_profile_rows")
+        if isinstance(run_rows, list):
+            runs = len(run_rows)
+        else:
+            kernel = result.get("kernel_profile", {})
+            calls = kernel.get("calls", {}) if isinstance(kernel, dict) else {}
+            runs = calls.get("bike_power_main_calc gesamt")
 
     try:
         if target_np is None:

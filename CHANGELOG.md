@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.10.1
+- Durchschnittsgeschwindigkeit in der CdA-Kalibrierung korrekt angezeigt
+- Hauptlaufanzahl aus dem Deep-Profiler übernommen
+- Keine Änderung der Berechnungslogik
+
+
 ## 2.10
 - Direkte CdA-Kalibrierungsübersicht in der App
 - Anzeige von CdA, AP, NP, Geschwindigkeit, fNP, Moving-Average-Wert und Laufanzahl

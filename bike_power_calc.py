@@ -744,6 +744,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'calibration_f_np': f_NP_Soll_fit if 'f_NP_Soll_fit' in globals() else None,
         'calibration_moving_average': n_moving_ave_AP_fit if 'n_moving_ave_AP_fit' in globals() else None,
         'calibration_runs': len(_run_profile_rows) if '_run_profile_rows' in globals() else None,
+        'run_profile_rows': _run_profile_rows if '_run_profile_rows' in globals() else None,
         'weather_interpolation_cache': {'hits': _weather_fast_cache_hits, 'misses': _weather_fast_cache_misses},
     }
     # Zusatzdaten für interaktive Streamlit/Plotly-Diagramme.
