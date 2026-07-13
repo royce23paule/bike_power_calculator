@@ -97,7 +97,7 @@ def init_session_state() -> None:
     if "profile" not in st.session_state:
         st.session_state.profile = None
     if "generate_pdf" not in st.session_state:
-        st.session_state.generate_pdf = True
+        st.session_state.generate_pdf = False
     if "generate_html_map" not in st.session_state:
         st.session_state.generate_html_map = True
     if "last_loaded_json_name" not in st.session_state:
@@ -335,230 +335,8 @@ def add_line(fig: go.Figure, result: dict[str, Any], x: list[Any], name: str, *s
 
 
 def render_interactive_charts(result: dict[str, Any]) -> None:
-    """Interaktive Plotly-Diagramme aus den vom Rechner gelieferten Serien."""
-    x = get_series(result, "pos")
-    x_label = "Distanz [km]"
-    if x is None:
-        t = get_series(result, "t_cumm")
-        if t is None:
-            st.info("Für interaktive Diagramme wurden keine Zeit-/Distanzdaten gefunden.")
-            return
-        x = [v / 60 for v in t]
-        x_label = "Zeit [min]"
-
-    st.caption("Interaktive Diagramme: zoomen, Kurven ein-/ausblenden und Werte mit der Maus ablesen.")
-
-    fig1 = go.Figure()
-    add_line(fig1, result, x, "Höhe geglättet [m]", "h")
-    add_line(fig1, result, x, "Höhe roh [m]", "h_raw")
-    add_line(fig1, result, x, "Steigung [%]", "grade")
-    fig1.update_layout(
-        title="Höhenprofil und Steigung",
-        xaxis_title=x_label,
-        yaxis_title="Wert",
-        hovermode="x unified",
-        legend_title="Kurven",
-    )
-    st.plotly_chart(fig1, use_container_width=True)
-
-    fig2 = go.Figure()
-    add_line(fig2, result, x, "Leistung [W]", "power")
-    add_line(fig2, result, x, "FIT-Leistung [W]", "Power_fit")
-    fig2.update_layout(
-        title="Leistung",
-        xaxis_title=x_label,
-        yaxis_title="Leistung [W]",
-        hovermode="x unified",
-        legend_title="Kurven",
-    )
-    if fig2.data:
-        st.plotly_chart(fig2, use_container_width=True)
-    else:
-        st.info("Keine Leistungsdaten gefunden.")
-
-    fig3 = go.Figure()
-    add_line(fig3, result, x, "Geschwindigkeit [km/h]", "v")
-    add_line(fig3, result, x, "Wind effektiv [km/h]", "v_w_List")
-    fig3.update_layout(
-        title="Geschwindigkeit und Wind",
-        xaxis_title=x_label,
-        yaxis_title="km/h",
-        hovermode="x unified",
-        legend_title="Kurven",
-    )
-    st.plotly_chart(fig3, use_container_width=True)
-
-    fig4 = go.Figure()
-    add_line(fig4, result, x, "CdA [m²]", "cdA_List")
-    add_line(fig4, result, x, "Luftdichte [kg/m³]", "rho_List")
-    fig4.update_layout(
-        title="Aerodynamik und Luftdichte",
-        xaxis_title=x_label,
-        yaxis_title="Wert",
-        hovermode="x unified",
-        legend_title="Kurven",
-    )
-    if fig4.data:
-        st.plotly_chart(fig4, use_container_width=True)
-    else:
-        st.info("Keine CdA-/Luftdichte-Daten gefunden.")
-
-    weather_available = any(result.get(name) for name in [
-        "AdvWeather_TempC", "AdvWeather_AirSpeed", "AdvWeather_AirDir",
-        "AdvWeather_AirMoisture", "AdvWeather_AirPressure",
-    ])
-    if weather_available:
-        fig5 = go.Figure()
-        add_line(fig5, result, x, "Temperatur [°C]", "AdvWeather_TempC")
-        add_line(fig5, result, x, "Wind [km/h]", "AdvWeather_AirSpeed")
-        add_line(fig5, result, x, "Windrichtung [°]", "AdvWeather_AirDir")
-        add_line(fig5, result, x, "Luftfeuchte [%]", "AdvWeather_AirMoisture")
-        add_line(fig5, result, x, "Luftdruck [hPa]", "AdvWeather_AirPressure")
-        fig5.update_layout(
-            title="Advanced Weather",
-            xaxis_title=x_label,
-            yaxis_title="Wert",
-            hovermode="x unified",
-            legend_title="Kurven",
-        )
-        st.plotly_chart(fig5, use_container_width=True)
-
-    with st.expander("Interaktive Rohdaten anzeigen"):
-        data = {"x": x}
-        for key in [
-            "h", "h_raw", "grade", "power", "Power_fit", "v", "v_w_List",
-            "rho_List", "cdA_List", "P_r_rel", "P_g_rel", "P_l_rel", "P_ges", "P_Save",
-            "AdvWeather_TempC", "AdvWeather_AirSpeed",
-            "AdvWeather_AirDir", "AdvWeather_AirMoisture", "AdvWeather_AirPressure",
-        ]:
-            series = result.get(key)
-            if isinstance(series, list) and series:
-                _, yy = same_length(x, series)
-                data[key] = yy
-        max_len = min(len(v) for v in data.values() if isinstance(v, list))
-        data = {k: v[:max_len] if isinstance(v, list) else v for k, v in data.items()}
-        st.dataframe(pd.DataFrame(data), use_container_width=True)
-
     with st.expander("Vollständige interaktive Auswertung anzeigen", expanded=False):
         render_full_interactive_report(result)
-
-
-
-def _unique_dataframe_columns(columns: list[str]) -> list[str]:
-    counts: dict[str, int] = {}
-    result = []
-    for index, column in enumerate(columns):
-        name = str(column).strip() or f"Spalte {index + 1}"
-        counts[name] = counts.get(name, 0) + 1
-        if counts[name] > 1:
-            name = f"{name} ({counts[name]})"
-        result.append(name)
-    return result
-
-
-def render_serialized_report_chart(item: dict[str, Any]) -> None:
-    series = item.get("series")
-    if not isinstance(series, list) or not series:
-        st.info("Keine darstellbaren Diagrammdaten vorhanden.")
-        return
-
-    secondary_axis = any(int(entry.get("axis", 0)) > 0 for entry in series)
-    figure = make_subplots(specs=[[{"secondary_y": secondary_axis}]])
-    primary_label = None
-    secondary_label = None
-
-    for entry in series:
-        x_values = entry.get("x", [])
-        y_values = entry.get("y", [])
-        if not x_values or not y_values:
-            continue
-
-        secondary = int(entry.get("axis", 0)) > 0
-        y_label = entry.get("y_label") or "Wert"
-        if secondary:
-            secondary_label = secondary_label or y_label
-        else:
-            primary_label = primary_label or y_label
-
-        if entry.get("type") == "bar":
-            trace = go.Bar(x=x_values, y=y_values, name=entry.get("name", "Verteilung"))
-        else:
-            trace = go.Scatter(
-                x=x_values,
-                y=y_values,
-                mode="lines",
-                name=entry.get("name", "Wert"),
-            )
-        figure.add_trace(trace, secondary_y=secondary)
-
-    figure.update_layout(
-        title=item.get("title", "Diagramm"),
-        xaxis_title=item.get("x_label", ""),
-        hovermode="x unified",
-        legend_title="Kurven",
-        height=520,
-    )
-    if primary_label:
-        figure.update_yaxes(title_text=primary_label, secondary_y=False)
-    if secondary_axis and secondary_label:
-        figure.update_yaxes(title_text=secondary_label, secondary_y=True)
-    st.plotly_chart(figure, use_container_width=True)
-
-
-def render_serialized_report_table(item: dict[str, Any]) -> None:
-    rows = item.get("rows", [])
-    columns = item.get("columns", [])
-    if not rows:
-        st.info("Keine Tabellendaten vorhanden.")
-        return
-
-    width = max(len(row) for row in rows)
-    normalized = [list(row) + [""] * (width - len(row)) for row in rows]
-    first_row = normalized[0]
-    use_header = (
-        len(normalized) > 1
-        and all(str(value).strip() for value in first_row)
-        and any(not str(value).replace(".", "", 1).replace("-", "", 1).isdigit() for value in first_row)
-    )
-
-    if use_header:
-        dataframe_columns = _unique_dataframe_columns([str(value) for value in first_row])
-        dataframe_rows = normalized[1:]
-    else:
-        if len(columns) != width:
-            columns = [f"Spalte {index + 1}" for index in range(width)]
-        dataframe_columns = _unique_dataframe_columns(columns)
-        dataframe_rows = normalized
-
-    st.dataframe(
-        pd.DataFrame(dataframe_rows, columns=dataframe_columns),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-
-def render_full_interactive_report(result: dict[str, Any]) -> None:
-    items = result.get("interactive_report_items")
-    if not isinstance(items, list) or not items:
-        st.info("Für diesen Lauf wurden keine vollständigen Reportdaten bereitgestellt.")
-        return
-
-    chart_count = sum(1 for item in items if item.get("kind") == "chart")
-    table_count = sum(1 for item in items if item.get("kind") == "table")
-    st.caption(f"{chart_count} interaktive Diagramme und {table_count} Tabellen aus dem PDF-Report.")
-
-    for index, item in enumerate(items):
-        title = item.get("title") or f"Auswertung {index + 1}"
-        kind = item.get("kind")
-        icon = "📊" if kind == "chart" else "📋"
-        with st.expander(f"{icon} {title}", expanded=False):
-            if kind == "chart":
-                render_serialized_report_chart(item)
-            elif kind == "table":
-                render_serialized_report_table(item)
-            else:
-                st.info(item.get("text", "Keine Darstellung verfügbar."))
-
 
 def format_seconds(value: float | None) -> str:
     if value is None:
@@ -900,31 +678,18 @@ def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[st
         else:
             st.info("Keine HTML-Karte gefunden.")
 
-    tab_labels = ["📈 Interaktive Diagramme"]
-    if pdf_path and pdf_path.exists():
-        tab_labels.append("📄 PDF")
-    if map_path and map_path.exists():
-        tab_labels.append("🗺 Karte")
-    tab_labels.append("🧾 Berechnungslog")
-
-    result_tabs = st.tabs(tab_labels)
-
-    tab_index = 0
-    with result_tabs[tab_index]:
-        render_interactive_charts(result)
-    tab_index += 1
+    st.subheader("Vollständige interaktive Auswertung")
+    render_interactive_charts(result)
 
     if pdf_path and pdf_path.exists():
-        with result_tabs[tab_index]:
+        with st.expander("PDF-Vorschau anzeigen", expanded=False):
             pdf_viewer(pdf_path)
-        tab_index += 1
 
     if map_path and map_path.exists():
-        with result_tabs[tab_index]:
+        with st.expander("HTML-Karte anzeigen", expanded=False):
             html_map_viewer(map_path)
-        tab_index += 1
 
-    with result_tabs[tab_index]:
+    with st.expander("Berechnungslog anzeigen", expanded=False):
         if run_log:
             st.code(run_log)
         else:

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.11.1
+- Separater Bereich „Interaktive Diagramme“ entfernt
+- Interaktive Rohdatenansicht entfernt
+- Vollständige interaktive Auswertung bleibt als ein ausklappbarer Gesamtbereich
+- Diagramme und Tabellen innerhalb des Bereichs direkt sichtbar
+- Berechnungslog als ausklappbarer Bereich
+- PDF standardmäßig deaktiviert
+- PDF- und Karten-Vorschau nur bei vorhandener Ausgabe ausklappbar
+
+
 ## 2.11
 - Vollständige interaktive Auswertung aller PDF-Diagramme und PDF-Tabellen
 - Vorhandene Matplotlib-Reportdaten werden ohne erneute Physikberechnung übernommen

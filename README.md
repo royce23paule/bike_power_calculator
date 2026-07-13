@@ -73,3 +73,11 @@ Unter „Interaktive Diagramme“ befindet sich eine standardmäßig zugeklappte
 vollständige Auswertung. Die bereits für den PDF-Bericht erzeugten Diagramme und
 Tabellen werden als interaktive Plotly-Grafiken beziehungsweise
 Streamlit-Tabellen dargestellt.
+
+
+## Version 2.11.1
+
+Die Ergebnisansicht wurde vereinfacht. Die vollständige interaktive Auswertung
+ist ein einziger standardmäßig geschlossener Bereich. Nach dem Öffnen sind alle
+Diagramme und Tabellen direkt sichtbar. Berechnungslog, PDF-Vorschau und
+HTML-Karte sind separate ausklappbare Bereiche. PDF ist standardmäßig deaktiviert.
