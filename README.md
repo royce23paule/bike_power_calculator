@@ -39,7 +39,7 @@ Behoben:
 - CdA-Suche und physikalischer Rechenkern bleiben unverändert.
 
 
-## Version 2.6
+## Version 2.6.1
 
 Diese Version enthält ausschließlich detailliertes Rechenkern-Profiling.
 Im Entwicklermodus werden Zeit, Aufrufszahl und mittlere Dauer pro Aufruf angezeigt.

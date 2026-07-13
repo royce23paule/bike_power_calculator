@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.6.1
+- Behoben: `NameError` für `_kernel_profile`
+- Profiler-Speicher liegt jetzt auf Modulebene und wird pro Lauf zurückgesetzt
+
+
 ## 2.6
 - Detailliertes Profiling innerhalb von `bike_power_main_calc()`
 - Zeit pro Abschnitt

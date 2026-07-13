@@ -8,6 +8,14 @@ from math import pi,acos,sin,cos,atan2,nan,atan,exp,sqrt,fabs,copysign,isnan
 from scipy.ndimage import gaussian_filter1d
 import datetime
 import time
+
+# Moduleweiter Profiler-Speicher. Er wird zu Beginn jedes Run()-Aufrufs
+# zurückgesetzt und kann dadurch von den globalen Rechenfunktionen verwendet werden.
+_kernel_profile = {
+    'sections': {},
+    'calls': {},
+    'meta': {}
+}
 import folium #conda install -c conda-forge folium
 import webbrowser
 from scipy import fftpack
@@ -433,6 +441,7 @@ def Find_Index_Close(a,v): #Find the position p, where the value v has the close
     
 #-----------------------------------------------------------------------------------------------------------------------------------------
 def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,eta_,cr_dyn_,cr_,cdA_Hill_,FTP_,power_max_liste_,NP_Soll_,pol_a0_,pol_grade_max_,power_min_,pol_grade_min_,dir_w_,v_w0_,T_Luft_,GPX_File_,Hoehengewinn_Soll_,Steigung_max_min_,sigma_filter_,x_Achse_,Histogram_Anz_Teilungen_,Gaus_Filter_,moving_ave_filter_,Open_HTML_Map_,Show_km_Markers_,Show_Plots_in_Run_,Use_AdvWeather_,API_Weather_,API_StratTime_,Wetterdatei_,Winddamping_,Anmerkungen,Speed_Soll,Start_Distance_,End_Distance_,Generate_PDF=True,Generate_HTML_Map=True):
+    global _kernel_profile
     global power_max,m_sys,m_r,m_b
     global cdA_Hill_Grade,cdA_Flat,Draft_Save_Grade,Draft_Save,eta,cr_dyn,cr,cdA_Hill,FTP
     global power_max_liste,NP_Soll,pol_a0,pol_grade_max,power_min,pol_grade_min
@@ -444,11 +453,12 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     global API_Cache_Hits, API_Cache_Misses, API_Request_Count
     #get_ipython().run_line_magic('matplotlib', 'inline')
     _profile_steps = []
-    _kernel_profile = {
+    _kernel_profile.clear()
+    _kernel_profile.update({
         'sections': {},
         'calls': {},
         'meta': {}
-    }
+    })
     _profile_last = time.perf_counter()
 
     def _profile_mark(name):
