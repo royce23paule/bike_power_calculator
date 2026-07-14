@@ -28,6 +28,46 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
+st.markdown(
+    """
+    <style>
+    .stAppViewContainer .main .block-container,
+    section.main > div.block-container,
+    div[data-testid="stMainBlockContainer"] {
+        max-width: 100% !important;
+        width: 100% !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+    }
+
+    div[data-testid="stVerticalBlock"],
+    div[data-testid="stHorizontalBlock"],
+    div[data-testid="column"] {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    div[data-testid="stDataFrame"],
+    div[data-testid="stPlotlyChart"],
+    div[data-testid="stExpander"],
+    div[data-testid="stMetric"] {
+        max-width: 100% !important;
+    }
+
+    @media (max-width: 900px) {
+        .stAppViewContainer .main .block-container,
+        section.main > div.block-container,
+        div[data-testid="stMainBlockContainer"] {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 APP_VERSION = "2.4"
 BUILD_DATE = "2026-07-10"
 ENGINE_VERSION = "1.5.1-cache-benchmark"

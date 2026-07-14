@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.11.4
+- Hauptbereich nutzt zuverlässig die vollständige verfügbare Breite
+- Streamlit-Maximalbreite per CSS aufgehoben
+- Diagramme, Tabellen und Expander dürfen volle Containerbreite verwenden
+- Responsive Seitenabstände für kleinere Bildschirme
+- Keine Änderung der Berechnungslogik
+
+
 ## 2.11.3
 - Berechnungslog erfasst jetzt stdout und stderr
 - Log wird zusätzlich im Ergebnisobjekt gespeichert
