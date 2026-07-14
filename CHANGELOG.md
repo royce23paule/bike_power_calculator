@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.12
+- Neue interaktive GPS-Trackkarte in der vollständigen Auswertung
+- Einfärbung nach Geschwindigkeit, Leistung, Wind, relativer Luftgeschwindigkeit, Höhe oder Steigung
+- Optionale Windrichtungspfeile mit einstellbarem Abstand
+- Start-/Zielmarkierung und Tooltips
+- Bestehender HTML-Kartenexport bleibt erhalten
+- Keine Änderung der Berechnungsphysik
+
+
 ## 2.11.5
 - Veraltete Versions- und Build-Angaben projektweit aktualisiert
 - Zentrale Konstanten für App-Version, Build-Datum und Rechenkernversion

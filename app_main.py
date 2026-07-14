@@ -15,6 +15,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import pydeck as pdk
 from plotly.subplots import make_subplots
 
 import bike_power_calc as bpc
@@ -68,7 +69,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "2.11.5"
+APP_VERSION = "2.12"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -472,6 +473,232 @@ def render_serialized_report_table(item: dict[str, Any]) -> None:
     )
 
 
+
+def _normalize_map_values(values: list[float]) -> list[float]:
+    numeric = np.asarray(values, dtype=float)
+    finite = np.isfinite(numeric)
+    if not finite.any():
+        return [0.5] * len(numeric)
+
+    low = float(np.nanpercentile(numeric[finite], 5))
+    high = float(np.nanpercentile(numeric[finite], 95))
+    if high <= low:
+        return [0.5] * len(numeric)
+
+    normalized = (numeric - low) / (high - low)
+    normalized = np.clip(normalized, 0.0, 1.0)
+    normalized[~finite] = 0.5
+    return normalized.tolist()
+
+
+def _color_from_normalized(value: float) -> list[int]:
+    value = max(0.0, min(1.0, float(value)))
+    # Blau -> Türkis -> Gelb -> Rot
+    if value < 0.33:
+        fraction = value / 0.33
+        red = int(30 + 20 * fraction)
+        green = int(90 + 140 * fraction)
+        blue = int(220 - 80 * fraction)
+    elif value < 0.66:
+        fraction = (value - 0.33) / 0.33
+        red = int(50 + 200 * fraction)
+        green = int(230 - 20 * fraction)
+        blue = int(140 - 100 * fraction)
+    else:
+        fraction = (value - 0.66) / 0.34
+        red = 250
+        green = int(210 - 160 * fraction)
+        blue = int(40 - 20 * fraction)
+    return [red, green, blue, 220]
+
+
+def _bearing_endpoint(lat: float, lon: float, bearing_deg: float, length_deg: float) -> tuple[float, float]:
+    bearing = np.deg2rad(float(bearing_deg))
+    dlat = np.cos(bearing) * length_deg
+    dlon = np.sin(bearing) * length_deg / max(np.cos(np.deg2rad(lat)), 0.2)
+    return lat + dlat, lon + dlon
+
+
+def render_colored_track_map(result: dict[str, Any]) -> None:
+    lat = result.get("map_latitude")
+    lon = result.get("map_longitude")
+    distance = result.get("map_distance_km")
+    if not isinstance(lat, list) or not isinstance(lon, list):
+        st.info("Für diesen Lauf sind keine GPS-Daten verfügbar.")
+        return
+
+    metrics = {
+        "Geschwindigkeit [km/h]": result.get("map_speed_kmh"),
+        "Leistung [W]": result.get("map_power_w"),
+        "Windgeschwindigkeit [km/h]": result.get("map_wind_kmh"),
+        "Relative Luftgeschwindigkeit [km/h]": result.get("map_air_speed_kmh"),
+        "Höhe [m]": result.get("map_elevation_m"),
+        "Steigung [%]": result.get("map_grade_percent"),
+    }
+    metrics = {
+        name: values for name, values in metrics.items()
+        if isinstance(values, list) and len(values) > 1
+    }
+    if not metrics:
+        st.info("Für die Karteneinfärbung stehen keine Messreihen zur Verfügung.")
+        return
+
+    control_cols = st.columns([2, 1, 1])
+    with control_cols[0]:
+        selected_metric = st.selectbox(
+            "Track einfärben nach",
+            list(metrics.keys()),
+            index=0,
+            key="track_map_metric",
+        )
+    with control_cols[1]:
+        show_wind_arrows = st.checkbox(
+            "Windrichtungspfeile",
+            value=False,
+            key="track_map_wind_arrows",
+        )
+    with control_cols[2]:
+        arrow_spacing_km = st.number_input(
+            "Pfeilabstand [km]",
+            min_value=0.5,
+            max_value=20.0,
+            value=2.0,
+            step=0.5,
+            disabled=not show_wind_arrows,
+            key="track_map_arrow_spacing",
+        )
+
+    values = metrics[selected_metric]
+    n = min(len(lat), len(lon), len(values))
+    if isinstance(distance, list):
+        n = min(n, len(distance))
+    if n < 2:
+        st.info("Zu wenige GPS-Punkte für die Kartenanzeige.")
+        return
+
+    lat = [float(value) for value in lat[:n]]
+    lon = [float(value) for value in lon[:n]]
+    values = [float(value) for value in values[:n]]
+    if isinstance(distance, list):
+        distance_values = [float(value) for value in distance[:n]]
+    else:
+        distance_values = list(np.linspace(0.0, float(n - 1), n))
+
+    normalized = _normalize_map_values(values)
+    segments = []
+    for index in range(n - 1):
+        segments.append({
+            "path": [[lon[index], lat[index]], [lon[index + 1], lat[index + 1]]],
+            "color": _color_from_normalized((normalized[index] + normalized[index + 1]) / 2),
+            "value": round((values[index] + values[index + 1]) / 2, 3),
+            "metric": selected_metric,
+            "distance": round(distance_values[index], 3),
+        })
+
+    layers = [
+        pdk.Layer(
+            "PathLayer",
+            data=segments,
+            get_path="path",
+            get_color="color",
+            width_scale=1,
+            width_min_pixels=4,
+            pickable=True,
+            auto_highlight=True,
+        )
+    ]
+
+    # Start and finish markers.
+    markers = [
+        {"position": [lon[0], lat[0]], "label": "Start"},
+        {"position": [lon[-1], lat[-1]], "label": "Ziel"},
+    ]
+    layers.append(
+        pdk.Layer(
+            "ScatterplotLayer",
+            data=markers,
+            get_position="position",
+            get_radius=35,
+            get_fill_color=[255, 255, 255, 230],
+            get_line_color=[0, 0, 0, 255],
+            line_width_min_pixels=2,
+            stroked=True,
+            pickable=True,
+        )
+    )
+
+    if show_wind_arrows:
+        wind_direction = result.get("map_wind_direction_deg")
+        wind_speed = result.get("map_wind_kmh")
+        if isinstance(wind_direction, list) and isinstance(wind_speed, list):
+            arrow_n = min(n, len(wind_direction), len(wind_speed))
+            arrows = []
+            next_distance = 0.0
+            for index in range(arrow_n):
+                if distance_values[index] + 1e-9 < next_distance:
+                    continue
+                speed = abs(float(wind_speed[index]))
+                length = 0.0012 + min(speed, 40.0) / 40.0 * 0.0020
+                # Meteorologische Windrichtung: Pfeil zeigt in Strömungsrichtung.
+                bearing = (float(wind_direction[index]) + 180.0) % 360.0
+                end_lat, end_lon = _bearing_endpoint(lat[index], lon[index], bearing, length)
+                arrows.append({
+                    "source": [lon[index], lat[index]],
+                    "target": [end_lon, end_lat],
+                    "wind_speed": round(speed, 2),
+                    "wind_direction": round(float(wind_direction[index]), 1),
+                })
+                next_distance = distance_values[index] + float(arrow_spacing_km)
+
+            if arrows:
+                layers.append(
+                    pdk.Layer(
+                        "LineLayer",
+                        data=arrows,
+                        get_source_position="source",
+                        get_target_position="target",
+                        get_color=[30, 30, 30, 210],
+                        get_width=3,
+                        width_min_pixels=2,
+                        pickable=True,
+                    )
+                )
+
+    center_lat = float(np.nanmean(lat))
+    center_lon = float(np.nanmean(lon))
+    view_state = pdk.ViewState(
+        latitude=center_lat,
+        longitude=center_lon,
+        zoom=10,
+        pitch=0,
+    )
+
+    tooltip = {
+        "html": (
+            "<b>{metric}</b>: {value}<br/>"
+            "Distanz: {distance} km"
+        ),
+        "style": {"backgroundColor": "rgba(20,20,20,0.9)", "color": "white"},
+    }
+
+    deck = pdk.Deck(
+        layers=layers,
+        initial_view_state=view_state,
+        map_style=None,
+        tooltip=tooltip,
+    )
+    st.pydeck_chart(deck, use_container_width=True)
+
+    values_array = np.asarray(values, dtype=float)
+    finite = values_array[np.isfinite(values_array)]
+    if finite.size:
+        stat_cols = st.columns(4)
+        stat_cols[0].metric("Minimum", f"{np.min(finite):.2f}")
+        stat_cols[1].metric("Median", f"{np.median(finite):.2f}")
+        stat_cols[2].metric("Mittelwert", f"{np.mean(finite):.2f}")
+        stat_cols[3].metric("Maximum", f"{np.max(finite):.2f}")
+
+
 def render_full_interactive_report(result: dict[str, Any]) -> None:
     items = result.get("interactive_report_items")
     if not isinstance(items, list) or not items:
@@ -484,6 +711,10 @@ def render_full_interactive_report(result: dict[str, Any]) -> None:
         f"{chart_count} interaktive Diagramme und "
         f"{table_count} Tabellen aus dem PDF-Report."
     )
+
+    st.markdown("### GPS-Trackkarte")
+    render_colored_track_map(result)
+    st.divider()
 
     for index, item in enumerate(items):
         title = item.get("title") or f"Auswertung {index + 1}"

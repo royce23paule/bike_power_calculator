@@ -906,6 +906,23 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'run_profile_rows': _run_profile_rows if '_run_profile_rows' in globals() else None,
         'weather_interpolation_cache': {'hits': _weather_fast_cache_hits, 'misses': _weather_fast_cache_misses},
         'interactive_report_items': interactive_report_items,
+        'map_latitude': lat if 'lat' in globals() else (lat2 if 'lat2' in globals() else None),
+        'map_longitude': lon if 'lon' in globals() else (lon2 if 'lon2' in globals() else None),
+        'map_distance_km': pos if 'pos' in globals() else None,
+        'map_speed_kmh': v if 'v' in globals() else None,
+        'map_power_w': power if 'power' in globals() else None,
+        'map_wind_kmh': v_w_List if 'v_w_List' in globals() else None,
+        'map_air_speed_kmh': (
+            [abs(float(v[i]) + float(v_w_List[i])) for i in range(min(len(v), len(v_w_List)))]
+            if 'v' in globals() and 'v_w_List' in globals() else None
+        ),
+        'map_elevation_m': h if 'h' in globals() else None,
+        'map_grade_percent': grade if 'grade' in globals() else None,
+        'map_direction_deg': direction if 'direction' in globals() else None,
+        'map_wind_direction_deg': (
+            AdvWeather_AirDir if 'AdvWeather_AirDir' in globals()
+            else ([dir_w] * len(pos) if 'dir_w' in globals() and 'pos' in globals() else None)
+        ),
     }
     # Zusatzdaten für interaktive Streamlit/Plotly-Diagramme.
     # Die Berechnung selbst bleibt unverändert; hier werden nur bereits berechnete
