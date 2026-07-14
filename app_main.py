@@ -814,8 +814,12 @@ def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[st
             html_map_viewer(map_path)
 
     with st.expander("Berechnungslog anzeigen", expanded=False):
-        if run_log:
-            st.code(run_log)
+        effective_log = run_log
+        if not effective_log and isinstance(result, dict):
+            effective_log = result.get("run_log", "")
+
+        if effective_log:
+            st.code(effective_log)
         else:
             st.info("Kein Berechnungslog vorhanden.")
 
@@ -922,6 +926,29 @@ def render_fit_cache_debug(result: dict) -> None:
         {"Feld": "Schreibzeit [s]", "Wert": write_s},
     ]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+
+def should_show_cda_calibration(result: dict, config: dict) -> bool:
+    """CdA-Kalibrierung nur für FIT-Dateien mit positivem Speed_Soll anzeigen."""
+    route_file = str(config.get("GPX/FIT Datei", "")).strip().lower()
+    if not route_file.endswith(".fit"):
+        return False
+
+    target_speed = result.get("calibration_target_speed_kmh")
+    if target_speed is None:
+        # Fallback: Speed_Soll steckt als zweiter Wert im CdA-Feld.
+        raw_cda = str(config.get("cdA im Flachen [m^2]", ""))
+        try:
+            numbers = [float(value.replace(",", ".")) for value in re.findall(r"-?\d+(?:[\.,]\d+)?", raw_cda)]
+            target_speed = numbers[1] if len(numbers) > 1 else -1
+        except Exception:
+            target_speed = -1
+
+    try:
+        return float(target_speed) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def render_cda_calibration_summary(result: dict, config: dict) -> None:
@@ -1141,18 +1168,29 @@ def main() -> None:
                     run_config["Wetterdatei Advanced Weather"] = resolve_repository_path(str(run_config.get("Wetterdatei Advanced Weather", "")))
                     profile["validation_s"] = time.perf_counter() - t_validation_start
 
-                    with contextlib.redirect_stdout(log_buffer):
+                    with contextlib.redirect_stdout(log_buffer), contextlib.redirect_stderr(log_buffer):
                         progress.progress(25, text="Strecke, Wetter, PDF und Karte werden berechnet …")
                         t_calc_start = time.perf_counter()
                         if st.session_state.refresh_weather_cache:
                             bpc.clear_weather_api_cache()
-                        result = call_bike_power_calc(run_config, st.session_state.generate_pdf, st.session_state.generate_html_map)
+                        result = call_bike_power_calc(
+                            run_config,
+                            st.session_state.generate_pdf,
+                            st.session_state.generate_html_map,
+                        )
                         profile["calculation_s"] = time.perf_counter() - t_calc_start
 
                     t_post_start = time.perf_counter()
                     progress.progress(100, text="Berechnung abgeschlossen.")
+                    captured_log = log_buffer.getvalue()
+                    if not captured_log.strip():
+                        captured_log = "Die Berechnung hat keine Textausgaben erzeugt."
+
+                    if isinstance(result, dict):
+                        result["run_log"] = captured_log
+
                     st.session_state.result = result
-                    st.session_state.run_log = log_buffer.getvalue()
+                    st.session_state.run_log = captured_log
                     profile["postprocess_s"] = time.perf_counter() - t_post_start
 
                 profile["total_s"] = time.perf_counter() - t_total_start
@@ -1173,8 +1211,17 @@ def main() -> None:
                     st.code(st.session_state.run_log)
 
     render_results(st.session_state.result, st.session_state.run_log, st.session_state.profile)
-    if st.session_state.result:
-        render_cda_calibration_summary(st.session_state.result, st.session_state.config)
+    if (
+        st.session_state.result
+        and should_show_cda_calibration(
+            st.session_state.result,
+            st.session_state.config,
+        )
+    ):
+        render_cda_calibration_summary(
+            st.session_state.result,
+            st.session_state.config,
+        )
     if st.session_state.get("developer_mode", False) and st.session_state.result:
         render_kernel_profile(st.session_state.result)
         render_fit_cache_debug(st.session_state.result)

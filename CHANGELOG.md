@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.11.3
+- Berechnungslog erfasst jetzt stdout und stderr
+- Log wird zusätzlich im Ergebnisobjekt gespeichert
+- Anzeige verwendet Session-Log mit Ergebnis-Fallback
+- CdA-Kalibrierung nur bei FIT-Datei und positivem Speed_Soll
+- Keine Änderung der Berechnungslogik
+
+
 ## 2.11.2
 - Separater Bereich „Interaktive Diagramme“ entfernt
 - Interaktive Rohdatenansicht entfernt
