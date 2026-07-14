@@ -69,7 +69,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "2.12.3"
+APP_VERSION = "2.12.4"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -605,22 +605,33 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
         except (TypeError, ValueError):
             return default
 
+    def format_tooltip_value(value) -> str:
+        if value is None:
+            return "—"
+        try:
+            numeric = float(value)
+            if not np.isfinite(numeric):
+                return "—"
+            return f"{numeric:.2f}"
+        except (TypeError, ValueError):
+            return "—"
+
     segments = []
     for index in range(n - 1):
         segments.append({
             "path": [[lon[index], lat[index]], [lon[index + 1], lat[index + 1]]],
             "color": _color_from_normalized((normalized[index] + normalized[index + 1]) / 2),
-            "value": round((values[index] + values[index + 1]) / 2, 3),
+            "value": f"{((values[index] + values[index + 1]) / 2):.2f}",
             "metric": selected_metric,
-            "distance": round(distance_values[index], 3),
-            "speed": value_at(all_speed, index),
-            "power": value_at(all_power, index),
-            "wind_speed": value_at(all_wind, index),
-            "wind_component": value_at(all_wind_component, index),
-            "air_speed": value_at(all_air_speed, index),
-            "elevation": value_at(all_elevation, index),
-            "grade": value_at(all_grade, index),
-            "wind_direction": value_at(all_wind_direction, index),
+            "distance": f"{distance_values[index]:.2f}",
+            "speed": format_tooltip_value(value_at(all_speed, index)),
+            "power": format_tooltip_value(value_at(all_power, index)),
+            "wind_speed": format_tooltip_value(value_at(all_wind, index)),
+            "wind_component": format_tooltip_value(value_at(all_wind_component, index)),
+            "air_speed": format_tooltip_value(value_at(all_air_speed, index)),
+            "elevation": format_tooltip_value(value_at(all_elevation, index)),
+            "grade": format_tooltip_value(value_at(all_grade, index)),
+            "wind_direction": format_tooltip_value(value_at(all_wind_direction, index)),
         })
 
     layers = [
@@ -714,17 +725,17 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
                 )
 
                 common = {
-                    "wind_speed": round(speed_value, 2),
-                    "wind_direction": round(direction_value, 1),
-                    "distance": round(distance_values[index], 2),
+                    "wind_speed": format_tooltip_value(speed_value),
+                    "wind_direction": format_tooltip_value(direction_value),
+                    "distance": f"{distance_values[index]:.2f}",
                     "metric": "Wind",
-                    "value": round(speed_value, 2),
-                    "speed": value_at(all_speed, index),
-                    "power": value_at(all_power, index),
-                    "wind_component": value_at(all_wind_component, index),
-                    "air_speed": value_at(all_air_speed, index),
-                    "elevation": value_at(all_elevation, index),
-                    "grade": value_at(all_grade, index),
+                    "value": format_tooltip_value(speed_value),
+                    "speed": format_tooltip_value(value_at(all_speed, index)),
+                    "power": format_tooltip_value(value_at(all_power, index)),
+                    "wind_component": format_tooltip_value(value_at(all_wind_component, index)),
+                    "air_speed": format_tooltip_value(value_at(all_air_speed, index)),
+                    "elevation": format_tooltip_value(value_at(all_elevation, index)),
+                    "grade": format_tooltip_value(value_at(all_grade, index)),
                 }
 
                 shafts.append({

@@ -914,7 +914,10 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'map_wind_kmh': wind_speed_abs_List if 'wind_speed_abs_List' in globals() else None,
         'map_wind_component_kmh': v_w_List if 'v_w_List' in globals() else None,
         'map_air_speed_kmh': air_speed_rel_List if 'air_speed_rel_List' in globals() else None,
-        'map_elevation_m': h if 'h' in globals() else None,
+        'map_elevation_m': (
+            h if 'h' in globals() and h is not None
+            else (h_raw if 'h_raw' in globals() else None)
+        ),
         'map_grade_percent': grade if 'grade' in globals() else None,
         'map_direction_deg': direction if 'direction' in globals() else None,
         'map_wind_direction_deg': (
@@ -1609,11 +1612,24 @@ def bike_power_main_calc(Power_fit_Input):
         rho_List.append(rho)
         v_w_List.append(v_w*3.6)
 
-        effective_wind_kmh = abs(float(v_w0) * float(Winddamping))
-        wind_speed_abs_List.append(effective_wind_kmh)
-        wind_direction_List.append(float(dir_w) % 360.0)
+        # Für die Kartendarstellung die tatsächlich zum aktuellen Zeitpunkt
+        # verwendeten Wetterwerte übernehmen. Bei Advanced Weather stehen diese
+        # nach calc_rho_advanced() jeweils am Listenende.
+        if Use_AdvWeather and 'AdvWeather_AirSpeed' in globals() and AdvWeather_AirSpeed:
+            raw_wind_speed_kmh = float(AdvWeather_AirSpeed[-1])
+        else:
+            raw_wind_speed_kmh = float(v_w0)
 
-        flow_direction_deg = (float(dir_w) + 180.0) % 360.0
+        if Use_AdvWeather and 'AdvWeather_AirDir' in globals() and AdvWeather_AirDir:
+            raw_wind_direction_deg = float(AdvWeather_AirDir[-1])
+        else:
+            raw_wind_direction_deg = float(dir_w)
+
+        effective_wind_kmh = abs(raw_wind_speed_kmh * float(Winddamping))
+        wind_speed_abs_List.append(effective_wind_kmh)
+        wind_direction_List.append(raw_wind_direction_deg % 360.0)
+
+        flow_direction_deg = (raw_wind_direction_deg + 180.0) % 360.0
         angle_rad = (flow_direction_deg - float(direction[i])) * deg2rad
         bike_speed_kmh = float(v_b) * 3.6
         relative_air_speed_kmh = sqrt(

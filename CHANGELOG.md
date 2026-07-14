@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.12.4
+- Höhe zuverlässig als auswählbare Kartengröße verfügbar
+- Höhenwert im Tooltip korrigiert
+- Alle Tooltip-Werte auf zwei Nachkommastellen formatiert
+- Windgeschwindigkeit und Windrichtung entlang der Strecke aus den zeitabhängigen Wetterdaten übernommen
+- Konstante Windanzeige bei Advanced Weather behoben
+- Keine Änderung der Rechenphysik; Korrekturen betreffen Kartendaten und Darstellung
+
+
 ## 2.12.3
 - Windrichtungspfeile standardmäßig aktiviert
 - Pfeilrichtung an meteorologische Windrichtung angepasst
