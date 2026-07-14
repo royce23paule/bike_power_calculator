@@ -69,7 +69,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "2.12.2"
+APP_VERSION = "2.12.3"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -531,6 +531,7 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
         "Geschwindigkeit [km/h]": result.get("map_speed_kmh"),
         "Leistung [W]": result.get("map_power_w"),
         "Windgeschwindigkeit [km/h]": result.get("map_wind_kmh"),
+        "Windkomponente längs [km/h]": result.get("map_wind_component_kmh"),
         "Relative Luftgeschwindigkeit [km/h]": result.get("map_air_speed_kmh"),
         "Höhe [m]": result.get("map_elevation_m"),
         "Steigung [%]": result.get("map_grade_percent"),
@@ -554,7 +555,7 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
     with control_cols[1]:
         show_wind_arrows = st.checkbox(
             "Windrichtungspfeile",
-            value=False,
+            value=True,
             key="track_map_wind_arrows",
         )
     with control_cols[2]:
@@ -585,6 +586,25 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
         distance_values = list(np.linspace(0.0, float(n - 1), n))
 
     normalized = _normalize_map_values(values)
+
+    all_speed = result.get("map_speed_kmh")
+    all_power = result.get("map_power_w")
+    all_wind = result.get("map_wind_kmh")
+    all_wind_component = result.get("map_wind_component_kmh")
+    all_air_speed = result.get("map_air_speed_kmh")
+    all_elevation = result.get("map_elevation_m")
+    all_grade = result.get("map_grade_percent")
+    all_wind_direction = result.get("map_wind_direction_deg")
+
+    def value_at(series, index, default=None):
+        if not isinstance(series, list) or index >= len(series):
+            return default
+        try:
+            value = float(series[index])
+            return value if np.isfinite(value) else default
+        except (TypeError, ValueError):
+            return default
+
     segments = []
     for index in range(n - 1):
         segments.append({
@@ -593,6 +613,14 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
             "value": round((values[index] + values[index + 1]) / 2, 3),
             "metric": selected_metric,
             "distance": round(distance_values[index], 3),
+            "speed": value_at(all_speed, index),
+            "power": value_at(all_power, index),
+            "wind_speed": value_at(all_wind, index),
+            "wind_component": value_at(all_wind_component, index),
+            "air_speed": value_at(all_air_speed, index),
+            "elevation": value_at(all_elevation, index),
+            "grade": value_at(all_grade, index),
+            "wind_direction": value_at(all_wind_direction, index),
         })
 
     layers = [
@@ -657,9 +685,9 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
                 ):
                     continue
 
-                # Meteorologische Richtung = Herkunft des Windes.
-                # Strömungsrichtung daher +180°.
-                flow_direction = (direction_value + 180.0) % 360.0
+                # Der Pfeil zeigt in die meteorologische Windrichtung:
+                # dorthin, woher der Wind kommt.
+                flow_direction = direction_value % 360.0
 
                 # Feste, gut sichtbare Pfeillänge; nur leicht abhängig von Windstärke.
                 shaft_length = 0.0018 + min(speed_value, 40.0) / 40.0 * 0.0012
@@ -691,6 +719,12 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
                     "distance": round(distance_values[index], 2),
                     "metric": "Wind",
                     "value": round(speed_value, 2),
+                    "speed": value_at(all_speed, index),
+                    "power": value_at(all_power, index),
+                    "wind_component": value_at(all_wind_component, index),
+                    "air_speed": value_at(all_air_speed, index),
+                    "elevation": value_at(all_elevation, index),
+                    "grade": value_at(all_grade, index),
                 }
 
                 shafts.append({
@@ -749,11 +783,21 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
     tooltip = {
         "html": (
             "<b>{metric}</b>: {value}<br/>"
-            "Distanz: {distance} km<br/>"
-            "Wind: {wind_speed} km/h<br/>"
-            "Windrichtung: {wind_direction}°"
+            "Distanz: {distance} km<hr style='margin:4px 0'>"
+            "Geschwindigkeit: {speed} km/h<br/>"
+            "Leistung: {power} W<br/>"
+            "Windgeschwindigkeit: {wind_speed} km/h<br/>"
+            "Windkomponente längs: {wind_component} km/h<br/>"
+            "Relative Luftgeschwindigkeit: {air_speed} km/h<br/>"
+            "Windrichtung: {wind_direction}°<br/>"
+            "Höhe: {elevation} m<br/>"
+            "Steigung: {grade} %"
         ),
-        "style": {"backgroundColor": "rgba(20,20,20,0.9)", "color": "white"},
+        "style": {
+            "backgroundColor": "rgba(20,20,20,0.92)",
+            "color": "white",
+            "fontSize": "0.85rem",
+        },
     }
 
     deck = pdk.Deck(

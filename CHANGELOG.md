@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.12.3
+- Windrichtungspfeile standardmäßig aktiviert
+- Pfeilrichtung an meteorologische Windrichtung angepasst
+- Windbetrag und vorzeichenbehaftete Längskomponente getrennt
+- Negative Werte nur noch bei „Windkomponente längs“
+- Relative Luftgeschwindigkeit vektoriell aus Bike- und Windvektor berechnet
+- Tooltip zeigt alle auswählbaren Größen plus Windrichtung
+- Keine Änderung der Rechenphysik; Korrekturen betreffen die Kartendarstellung
+
+
 ## 2.12.2
 - Windpfeile als robuste LineLayer-Kombination mit sichtbarer Pfeilspitze
 - Pfeilschaft und zwei Pfeilkopfsegmente

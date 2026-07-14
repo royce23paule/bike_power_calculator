@@ -911,17 +911,14 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'map_distance_km': pos if 'pos' in globals() else None,
         'map_speed_kmh': v if 'v' in globals() else None,
         'map_power_w': power if 'power' in globals() else None,
-        'map_wind_kmh': v_w_List if 'v_w_List' in globals() else None,
-        'map_air_speed_kmh': (
-            [abs(float(v[i]) + float(v_w_List[i])) for i in range(min(len(v), len(v_w_List)))]
-            if 'v' in globals() and 'v_w_List' in globals() else None
-        ),
+        'map_wind_kmh': wind_speed_abs_List if 'wind_speed_abs_List' in globals() else None,
+        'map_wind_component_kmh': v_w_List if 'v_w_List' in globals() else None,
+        'map_air_speed_kmh': air_speed_rel_List if 'air_speed_rel_List' in globals() else None,
         'map_elevation_m': h if 'h' in globals() else None,
         'map_grade_percent': grade if 'grade' in globals() else None,
         'map_direction_deg': direction if 'direction' in globals() else None,
         'map_wind_direction_deg': (
-            AdvWeather_AirDir if 'AdvWeather_AirDir' in globals()
-            else ([dir_w] * len(pos) if 'dir_w' in globals() and 'pos' in globals() else None)
+            wind_direction_List if 'wind_direction_List' in globals() else None
         ),
     }
     # Zusatzdaten für interaktive Streamlit/Plotly-Diagramme.
@@ -929,7 +926,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     # globale Arrays eingesammelt, falls sie im jeweiligen Lauf existieren.
     for _name in [
         'pos', 't_cumm', 'h', 'h_raw', 'grade', 'grade_raw', 'power', 'Power_fit',
-        'v', 'v_w_List', 'rho_List', 'cdA_List', 'P_r_rel', 'P_g_rel', 'P_l_rel', 'P_ges', 'P_Save', 'direction',
+        'v', 'v_w_List', 'wind_speed_abs_List', 'wind_direction_List', 'air_speed_rel_List', 'rho_List', 'cdA_List', 'P_r_rel', 'P_g_rel', 'P_l_rel', 'P_ges', 'P_Save', 'direction',
         'AdvWeather_TempC', 'AdvWeather_AirSpeed', 'AdvWeather_AirDir',
         'AdvWeather_AirMoisture', 'AdvWeather_AirPressure',
         'AdvWeather_ApparentT', 'AdvWeather_WindGusts', 'AdvWeather_Precipitation'
@@ -1528,7 +1525,7 @@ def smooth_height_data():
         
 def bike_power_main_calc(Power_fit_Input):
     global _kernel_profile, _kernel_run_context
-    global t,power,tP4,t_cumm,grade,v,P_r_rel,P_g_rel,P_l_rel,NP,AP,P_ges,P_Save,cdA_List,rho_List,v_w_List
+    global t,power,tP4,t_cumm,grade,v,P_r_rel,P_g_rel,P_l_rel,NP,AP,P_ges,P_Save,cdA_List,rho_List,v_w_List,wind_speed_abs_List,wind_direction_List,air_speed_rel_List
     _run_sections = {}
     _run_calls = {}
     _run_context = dict(_kernel_run_context) if isinstance(_kernel_run_context, dict) else {'type': str(_kernel_run_context)}
@@ -1556,6 +1553,9 @@ def bike_power_main_calc(Power_fit_Input):
     cdA_List=[nan]
     rho_List=[nan]
     v_w_List=[nan]
+    wind_speed_abs_List=[nan]
+    wind_direction_List=[nan]
+    air_speed_rel_List=[nan]
     for i in range(1,len(pos)):     
         _kp_t0 = time.perf_counter()
         grade_tmp=h[i]-h[i-1]
@@ -1608,6 +1608,23 @@ def bike_power_main_calc(Power_fit_Input):
         P_Save.append(P_Save_tmp)
         rho_List.append(rho)
         v_w_List.append(v_w*3.6)
+
+        effective_wind_kmh = abs(float(v_w0) * float(Winddamping))
+        wind_speed_abs_List.append(effective_wind_kmh)
+        wind_direction_List.append(float(dir_w) % 360.0)
+
+        flow_direction_deg = (float(dir_w) + 180.0) % 360.0
+        angle_rad = (flow_direction_deg - float(direction[i])) * deg2rad
+        bike_speed_kmh = float(v_b) * 3.6
+        relative_air_speed_kmh = sqrt(
+            max(
+                0.0,
+                bike_speed_kmh**2
+                + effective_wind_kmh**2
+                - 2.0 * bike_speed_kmh * effective_wind_kmh * cos(angle_rad),
+            )
+        )
+        air_speed_rel_List.append(relative_air_speed_kmh)
         _kp_add('Listen/Speichern', time.perf_counter()-_kp_t0)
 
     # AP und NP werden nur für das Endergebnis dieses vollständigen Laufs
