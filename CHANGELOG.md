@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.13.1
+- Behoben: fehlender `re`-Import in der Event-Datenbank
+- Event-IDs können wieder korrekt erzeugt werden
+- Keine Änderung der Berechnungslogik
+
+
 ## 2.13
 - Lokale Event-Datenbank eingeführt
 - Events mit Datum, Ort, Typ, Tags und Notizen anlegen
