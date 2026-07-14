@@ -68,8 +68,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "2.4"
-BUILD_DATE = "2026-07-10"
+APP_VERSION = "2.11.5"
+BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
 CHANGELOG = {
@@ -808,6 +808,24 @@ def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[st
     metric_cols[1].metric("Distanz", "—" if distance is None else f"{distance:.2f} km")
     metric_cols[2].metric("Zeit", format_duration(duration))
     metric_cols[3].metric("Ø Geschwindigkeit", "—" if avg_speed is None else f"{avg_speed:.2f} km/h")
+
+    power_cols = st.columns(2)
+    average_power = result.get("calibration_ap")
+    if average_power is None:
+        average_power = result.get("average_power_w")
+
+    normalized_power = result.get("calibration_np")
+    if normalized_power is None:
+        normalized_power = result.get("normalized_power_w")
+
+    power_cols[0].metric(
+        "Average Power",
+        "—" if average_power is None else f"{float(average_power):.2f} W",
+    )
+    power_cols[1].metric(
+        "Normalized Power",
+        "—" if normalized_power is None else f"{float(normalized_power):.2f} W",
+    )
 
     pdf_path_value = result.get("pdf_path")
     map_path_value = result.get("map_path")

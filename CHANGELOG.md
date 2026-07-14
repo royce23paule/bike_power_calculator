@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.11.5
+- Veraltete Versions- und Build-Angaben projektweit aktualisiert
+- Zentrale Konstanten für App-Version, Build-Datum und Rechenkernversion
+- Average Power und Normalized Power direkt unter den Ergebnis-Kennzahlen
+- Keine Änderung der Berechnungslogik
+
+
 ## 2.11.4
 - Hauptbereich nutzt zuverlässig die vollständige verfügbare Breite
 - Streamlit-Maximalbreite per CSS aufgehoben
