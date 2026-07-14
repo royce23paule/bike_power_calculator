@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.12.5
+- Höhenreihe explizit als numerische Liste exportiert
+- Höhe bleibt unabhängig von leichten Längenabweichungen auswählbar
+- Tooltip nutzt sicheren Index für Höhenwerte
+- Keine Änderung der Berechnungsphysik
+
+
 ## 2.12.4
 - Höhe zuverlässig als auswählbare Kartengröße verfügbar
 - Höhenwert im Tooltip korrigiert

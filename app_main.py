@@ -69,7 +69,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "2.12.4"
+APP_VERSION = "2.12.5"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -540,6 +540,12 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
         name: values for name, values in metrics.items()
         if isinstance(values, list) and len(values) > 1
     }
+
+    # Höhe explizit ergänzen, falls sie vorhanden ist, aber wegen einer
+    # abweichenden Länge zuvor herausgefiltert wurde.
+    elevation_values = result.get("map_elevation_m")
+    if isinstance(elevation_values, list) and len(elevation_values) > 1:
+        metrics["Höhe [m]"] = elevation_values
     if not metrics:
         st.info("Für die Karteneinfärbung stehen keine Messreihen zur Verfügung.")
         return
@@ -570,9 +576,10 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
         )
 
     values = metrics[selected_metric]
-    n = min(len(lat), len(lon), len(values))
+    n = min(len(lat), len(lon))
     if isinstance(distance, list):
         n = min(n, len(distance))
+    n = min(n, len(values))
     if n < 2:
         st.info("Zu wenige GPS-Punkte für die Kartenanzeige.")
         return
@@ -597,10 +604,12 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
     all_wind_direction = result.get("map_wind_direction_deg")
 
     def value_at(series, index, default=None):
-        if not isinstance(series, list) or index >= len(series):
+        if not isinstance(series, list) or not series:
             return default
+
+        safe_index = min(max(int(index), 0), len(series) - 1)
         try:
-            value = float(series[index])
+            value = float(series[safe_index])
             return value if np.isfinite(value) else default
         except (TypeError, ValueError):
             return default

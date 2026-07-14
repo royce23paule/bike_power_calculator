@@ -915,8 +915,13 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'map_wind_component_kmh': v_w_List if 'v_w_List' in globals() else None,
         'map_air_speed_kmh': air_speed_rel_List if 'air_speed_rel_List' in globals() else None,
         'map_elevation_m': (
-            h if 'h' in globals() and h is not None
-            else (h_raw if 'h_raw' in globals() else None)
+            [float(value) if value is not None else float('nan') for value in h]
+            if 'h' in globals() and h is not None
+            else (
+                [float(value) if value is not None else float('nan') for value in h_raw]
+                if 'h_raw' in globals() and h_raw is not None
+                else None
+            )
         ),
         'map_grade_percent': grade if 'grade' in globals() else None,
         'map_direction_deg': direction if 'direction' in globals() else None,
