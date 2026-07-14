@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.13
+- Lokale Event-Datenbank eingeführt
+- Events mit Datum, Ort, Typ, Tags und Notizen anlegen
+- Events suchen und auswählen
+- JSON-, GPX-, FIT- und CSV-Dateien einem Event zuordnen
+- JSON-Einstellungen direkt aus der Datenbank laden
+- GPX-/FIT-Dateien direkt in die Eingaben übernehmen
+- Dateien anzeigen und löschen
+- Grundstruktur für gespeicherte Berechnungen und Dokumente
+- Keine Änderung der Berechnungsphysik
+
+
 ## 2.12.5
 - Höhenreihe explizit als numerische Liste exportiert
 - Höhe bleibt unabhängig von leichten Längenabweichungen auswählbar

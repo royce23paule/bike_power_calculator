@@ -3,6 +3,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import shutil
+import uuid
 import platform
 import sys
 import tempfile
@@ -69,7 +71,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "2.12.5"
+APP_VERSION = "2.13"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -1494,6 +1496,314 @@ def render_cda_calibration_summary(result: dict, config: dict) -> None:
     else:
         st.warning("Kalibrierung abgeschlossen, aber mindestens ein Zielwert liegt außerhalb der Toleranz.")
 
+
+DATABASE_ROOT = Path("database")
+EVENTS_ROOT = DATABASE_ROOT / "events"
+
+
+def _ensure_database_structure() -> None:
+    EVENTS_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+def _slugify_event_name(name: str) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9äöüÄÖÜß]+", "-", name.strip().lower())
+    normalized = normalized.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
+    normalized = normalized.strip("-")
+    return normalized or f"event-{uuid.uuid4().hex[:8]}"
+
+
+def _event_directory(event_id: str) -> Path:
+    return EVENTS_ROOT / event_id
+
+
+def _event_metadata_path(event_id: str) -> Path:
+    return _event_directory(event_id) / "event.json"
+
+
+def _load_event_metadata(event_id: str) -> dict[str, Any]:
+    path = _event_metadata_path(event_id)
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_event_metadata(event_id: str, metadata: dict[str, Any]) -> None:
+    event_dir = _event_directory(event_id)
+    event_dir.mkdir(parents=True, exist_ok=True)
+    metadata = dict(metadata)
+    metadata["event_id"] = event_id
+    metadata.setdefault("created_at", datetime.now().isoformat(timespec="seconds"))
+    metadata["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    _event_metadata_path(event_id).write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def create_database_event(
+    name: str,
+    event_date: str = "",
+    location: str = "",
+    sport: str = "Triathlon",
+    tags: str = "",
+    notes: str = "",
+) -> str:
+    _ensure_database_structure()
+    base_id = _slugify_event_name(name)
+    event_id = base_id
+    counter = 2
+    while _event_directory(event_id).exists():
+        event_id = f"{base_id}-{counter}"
+        counter += 1
+
+    event_dir = _event_directory(event_id)
+    for subdir in ("inputs", "calculations", "documents"):
+        (event_dir / subdir).mkdir(parents=True, exist_ok=True)
+
+    _save_event_metadata(event_id, {
+        "name": name.strip(),
+        "date": event_date.strip(),
+        "location": location.strip(),
+        "sport": sport.strip(),
+        "tags": [tag.strip() for tag in tags.split(",") if tag.strip()],
+        "notes": notes.strip(),
+    })
+    return event_id
+
+
+def list_database_events() -> list[dict[str, Any]]:
+    _ensure_database_structure()
+    events = []
+    for event_dir in EVENTS_ROOT.iterdir():
+        if not event_dir.is_dir():
+            continue
+        metadata = _load_event_metadata(event_dir.name)
+        if metadata:
+            metadata["event_id"] = event_dir.name
+            events.append(metadata)
+
+    events.sort(
+        key=lambda item: (item.get("date") or "", item.get("name") or ""),
+        reverse=True,
+    )
+    return events
+
+
+def _event_input_files(event_id: str) -> list[dict[str, Any]]:
+    input_dir = _event_directory(event_id) / "inputs"
+    if not input_dir.exists():
+        return []
+
+    files = []
+    for path in sorted(input_dir.iterdir()):
+        if path.is_file():
+            files.append({
+                "name": path.name,
+                "suffix": path.suffix.lower(),
+                "size_kb": round(path.stat().st_size / 1024, 1),
+            })
+    return files
+
+
+def save_uploaded_file_to_event(event_id: str, uploaded_file) -> Path:
+    input_dir = _event_directory(event_id) / "inputs"
+    input_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = Path(uploaded_file.name).name
+    target = input_dir / filename
+    target.write_bytes(uploaded_file.getvalue())
+
+    metadata = _load_event_metadata(event_id)
+    stored_files = metadata.setdefault("files", [])
+    if filename not in stored_files:
+        stored_files.append(filename)
+    _save_event_metadata(event_id, metadata)
+    return target
+
+
+def delete_event_input_file(event_id: str, filename: str) -> None:
+    target = _event_directory(event_id) / "inputs" / Path(filename).name
+    if target.exists():
+        target.unlink()
+
+    metadata = _load_event_metadata(event_id)
+    metadata["files"] = [
+        item for item in metadata.get("files", []) if item != filename
+    ]
+    _save_event_metadata(event_id, metadata)
+
+
+def load_json_settings_from_event(event_id: str, filename: str) -> dict[str, Any]:
+    path = _event_directory(event_id) / "inputs" / Path(filename).name
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def copy_event_file_to_runtime(event_id: str, filename: str) -> Path:
+    source = _event_directory(event_id) / "inputs" / Path(filename).name
+    runtime_dir = Path("runtime_uploads")
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    target = runtime_dir / source.name
+    shutil.copy2(source, target)
+    return target
+
+
+def render_database_sidebar() -> None:
+    _ensure_database_structure()
+
+    st.divider()
+    st.subheader("📚 Datenbank")
+    tabs = st.tabs(["Events", "Neu", "Dateien"])
+
+    with tabs[0]:
+        events = list_database_events()
+        search = st.text_input("Suchen", key="database_search").strip().lower()
+
+        filtered = []
+        for event in events:
+            searchable = " ".join([
+                str(event.get("name", "")),
+                str(event.get("date", "")),
+                str(event.get("location", "")),
+                " ".join(event.get("tags", [])),
+            ]).lower()
+            if not search or search in searchable:
+                filtered.append(event)
+
+        if not filtered:
+            st.info("Noch keine passenden Events vorhanden.")
+        else:
+            options = {
+                f"{event.get('name', event['event_id'])} · {event.get('date', 'ohne Datum')}": event["event_id"]
+                for event in filtered
+            }
+            selected_label = st.selectbox(
+                "Event auswählen",
+                list(options.keys()),
+                key="database_selected_event_label",
+            )
+            st.session_state.database_selected_event = options[selected_label]
+            selected = _load_event_metadata(st.session_state.database_selected_event)
+            st.caption(
+                f"{selected.get('location', '—')} · "
+                f"{selected.get('sport', '—')} · "
+                f"{', '.join(selected.get('tags', [])) or 'keine Tags'}"
+            )
+
+    with tabs[1]:
+        with st.form("database_new_event_form"):
+            name = st.text_input("Name des Events")
+            event_date = st.date_input("Datum", value=None)
+            location = st.text_input("Ort")
+            sport = st.selectbox(
+                "Typ",
+                ["Triathlon", "Radrennen", "Training", "Strecke", "Sonstiges"],
+            )
+            tags = st.text_input("Tags, durch Kommas getrennt")
+            notes = st.text_area("Notizen")
+            submitted = st.form_submit_button("Event anlegen")
+
+            if submitted:
+                if not name.strip():
+                    st.error("Bitte einen Namen eingeben.")
+                else:
+                    event_id = create_database_event(
+                        name=name,
+                        event_date="" if event_date is None else event_date.isoformat(),
+                        location=location,
+                        sport=sport,
+                        tags=tags,
+                        notes=notes,
+                    )
+                    st.session_state.database_selected_event = event_id
+                    st.success(f"Event „{name}“ wurde angelegt.")
+
+    with tabs[2]:
+        event_id = st.session_state.get("database_selected_event")
+        if not event_id:
+            st.info("Zuerst unter „Events“ ein Event auswählen.")
+        else:
+            metadata = _load_event_metadata(event_id)
+            st.markdown(f"**{metadata.get('name', event_id)}**")
+
+            uploads = st.file_uploader(
+                "JSON-, GPX-, FIT- oder CSV-Dateien hinzufügen",
+                type=["json", "gpx", "fit", "csv"],
+                accept_multiple_files=True,
+                key=f"database_upload_{event_id}",
+            )
+            if uploads and st.button(
+                "Dateien im Event speichern",
+                key=f"database_save_files_{event_id}",
+                use_container_width=True,
+            ):
+                saved = [
+                    save_uploaded_file_to_event(event_id, uploaded).name
+                    for uploaded in uploads
+                ]
+                st.success(f"{len(saved)} Datei(en) gespeichert.")
+
+            files = _event_input_files(event_id)
+            if not files:
+                st.info("Noch keine Dateien gespeichert.")
+            else:
+                file_df = pd.DataFrame(files)
+                file_df = file_df[["name", "suffix", "size_kb"]]
+                file_df.columns = ["Datei", "Typ", "Größe [KB]"]
+                st.dataframe(file_df, use_container_width=True, hide_index=True)
+
+                selected_file = st.selectbox(
+                    "Datei auswählen",
+                    [item["name"] for item in files],
+                    key=f"database_file_select_{event_id}",
+                )
+                suffix = Path(selected_file).suffix.lower()
+                col1, col2 = st.columns(2)
+
+                if suffix == ".json":
+                    if col1.button(
+                        "Einstellungen laden",
+                        key=f"database_load_json_{event_id}",
+                        use_container_width=True,
+                    ):
+                        try:
+                            loaded = load_json_settings_from_event(event_id, selected_file)
+                            loaded_config = normalize_loaded_config(loaded)
+                            st.session_state.config = loaded_config
+                            sync_widgets_from_config(loaded_config)
+                            st.success("Einstellungen geladen.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"JSON konnte nicht geladen werden: {exc}")
+
+                elif suffix in {".gpx", ".fit"}:
+                    if col1.button(
+                        "Strecke/Fahrt laden",
+                        key=f"database_load_route_{event_id}",
+                        use_container_width=True,
+                    ):
+                        runtime_path = copy_event_file_to_runtime(event_id, selected_file)
+                        config = dict(st.session_state.config)
+                        config["GPX/FIT Datei"] = str(runtime_path)
+                        st.session_state.config = normalize_loaded_config(config)
+                        sync_widgets_from_config(st.session_state.config)
+                        st.success(f"{selected_file} wurde geladen.")
+                        st.rerun()
+                else:
+                    col1.caption("Aktuell nur Ablage verfügbar.")
+
+                if col2.button(
+                    "Datei löschen",
+                    key=f"database_delete_file_{event_id}",
+                    use_container_width=True,
+                ):
+                    delete_event_input_file(event_id, selected_file)
+                    st.success(f"{selected_file} wurde gelöscht.")
+                    st.rerun()
+
+
 def main() -> None:
     init_session_state()
 
@@ -1537,6 +1847,7 @@ def main() -> None:
             help="Zeigt Laufzeitprofile, Systeminformationen und Diagnosewerte.",
         )
         st.caption(f"Version {APP_VERSION} · Build {BUILD_DATE}")
+        render_database_sidebar()
 
     config = st.session_state.config.copy()
 
