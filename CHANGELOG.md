@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.12.1
+- Alte HTML-Karte standardmäßig deaktiviert
+- Windlinien durch echte Richtungspfeile mit sichtbarer Spitze ersetzt
+- Ungültige Start-/Endwerte werden übersprungen
+- Pfeilgröße begrenzt und nur moderat von der Windgeschwindigkeit abhängig
+- Keine Änderung der Berechnungsphysik
+
+
 ## 2.12
 - Neue interaktive GPS-Trackkarte in der vollständigen Auswertung
 - Einfärbung nach Geschwindigkeit, Leistung, Wind, relativer Luftgeschwindigkeit, Höhe oder Steigung

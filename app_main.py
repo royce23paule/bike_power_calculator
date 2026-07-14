@@ -69,7 +69,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "2.12"
+APP_VERSION = "2.12.1"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -140,7 +140,7 @@ def init_session_state() -> None:
     if "generate_pdf" not in st.session_state:
         st.session_state.generate_pdf = False
     if "generate_html_map" not in st.session_state:
-        st.session_state.generate_html_map = True
+        st.session_state.generate_html_map = False
     if "last_loaded_json_name" not in st.session_state:
         st.session_state.last_loaded_json_name = None
     if "developer_mode" not in st.session_state:
@@ -630,36 +630,67 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
     if show_wind_arrows:
         wind_direction = result.get("map_wind_direction_deg")
         wind_speed = result.get("map_wind_kmh")
+
         if isinstance(wind_direction, list) and isinstance(wind_speed, list):
             arrow_n = min(n, len(wind_direction), len(wind_speed))
             arrows = []
-            next_distance = 0.0
-            for index in range(arrow_n):
+            next_distance = max(float(arrow_spacing_km) * 0.5, 0.25)
+
+            for index in range(1, max(1, arrow_n - 1)):
                 if distance_values[index] + 1e-9 < next_distance:
                     continue
-                speed = abs(float(wind_speed[index]))
-                length = 0.0012 + min(speed, 40.0) / 40.0 * 0.0020
-                # Meteorologische Windrichtung: Pfeil zeigt in Strömungsrichtung.
-                bearing = (float(wind_direction[index]) + 180.0) % 360.0
-                end_lat, end_lon = _bearing_endpoint(lat[index], lon[index], bearing, length)
+
+                try:
+                    direction_value = float(wind_direction[index])
+                    speed_value = abs(float(wind_speed[index]))
+                    latitude_value = float(lat[index])
+                    longitude_value = float(lon[index])
+                except (TypeError, ValueError):
+                    continue
+
+                if not (
+                    np.isfinite(direction_value)
+                    and np.isfinite(speed_value)
+                    and np.isfinite(latitude_value)
+                    and np.isfinite(longitude_value)
+                ):
+                    continue
+
+                # Meteorologische Windrichtung beschreibt, woher der Wind kommt.
+                # Der Pfeil zeigt daher um 180° versetzt in Strömungsrichtung.
+                flow_direction = (direction_value + 180.0) % 360.0
+
+                # TextLayer dreht im Uhrzeigersinn. Das Symbol ➤ zeigt ohne
+                # Rotation nach rechts/Osten; daher 90° Korrektur.
+                text_angle = (90.0 - flow_direction) % 360.0
+
+                # Größe nur moderat von der Windgeschwindigkeit abhängig machen.
+                icon_size = 20.0 + min(speed_value, 40.0) / 40.0 * 16.0
+
                 arrows.append({
-                    "source": [lon[index], lat[index]],
-                    "target": [end_lon, end_lat],
-                    "wind_speed": round(speed, 2),
-                    "wind_direction": round(float(wind_direction[index]), 1),
+                    "position": [longitude_value, latitude_value],
+                    "text": "➤",
+                    "angle": text_angle,
+                    "size": icon_size,
+                    "wind_speed": round(speed_value, 2),
+                    "wind_direction": round(direction_value, 1),
+                    "distance": round(distance_values[index], 2),
                 })
                 next_distance = distance_values[index] + float(arrow_spacing_km)
 
             if arrows:
                 layers.append(
                     pdk.Layer(
-                        "LineLayer",
+                        "TextLayer",
                         data=arrows,
-                        get_source_position="source",
-                        get_target_position="target",
-                        get_color=[30, 30, 30, 210],
-                        get_width=3,
-                        width_min_pixels=2,
+                        get_position="position",
+                        get_text="text",
+                        get_size="size",
+                        get_angle="angle",
+                        get_color=[20, 20, 20, 235],
+                        get_text_anchor="'middle'",
+                        get_alignment_baseline="'center'",
+                        billboard=True,
                         pickable=True,
                     )
                 )
@@ -676,7 +707,9 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
     tooltip = {
         "html": (
             "<b>{metric}</b>: {value}<br/>"
-            "Distanz: {distance} km"
+            "Distanz: {distance} km<br/>"
+            "Wind: {wind_speed} km/h<br/>"
+            "Windrichtung: {wind_direction}°"
         ),
         "style": {"backgroundColor": "rgba(20,20,20,0.9)", "color": "white"},
     }
