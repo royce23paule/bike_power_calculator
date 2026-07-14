@@ -69,7 +69,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "2.12.1"
+APP_VERSION = "2.12.2"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -633,7 +633,8 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
 
         if isinstance(wind_direction, list) and isinstance(wind_speed, list):
             arrow_n = min(n, len(wind_direction), len(wind_speed))
-            arrows = []
+            shafts = []
+            heads = []
             next_distance = max(float(arrow_spacing_km) * 0.5, 0.25)
 
             for index in range(1, max(1, arrow_n - 1)):
@@ -656,41 +657,82 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
                 ):
                     continue
 
-                # Meteorologische Windrichtung beschreibt, woher der Wind kommt.
-                # Der Pfeil zeigt daher um 180° versetzt in Strömungsrichtung.
+                # Meteorologische Richtung = Herkunft des Windes.
+                # Strömungsrichtung daher +180°.
                 flow_direction = (direction_value + 180.0) % 360.0
 
-                # TextLayer dreht im Uhrzeigersinn. Das Symbol ➤ zeigt ohne
-                # Rotation nach rechts/Osten; daher 90° Korrektur.
-                text_angle = (90.0 - flow_direction) % 360.0
+                # Feste, gut sichtbare Pfeillänge; nur leicht abhängig von Windstärke.
+                shaft_length = 0.0018 + min(speed_value, 40.0) / 40.0 * 0.0012
+                end_lat, end_lon = _bearing_endpoint(
+                    latitude_value,
+                    longitude_value,
+                    flow_direction,
+                    shaft_length,
+                )
 
-                # Größe nur moderat von der Windgeschwindigkeit abhängig machen.
-                icon_size = 20.0 + min(speed_value, 40.0) / 40.0 * 16.0
+                # Pfeilspitzen relativ zum Schaft.
+                head_length = shaft_length * 0.35
+                left_lat, left_lon = _bearing_endpoint(
+                    end_lat,
+                    end_lon,
+                    (flow_direction + 150.0) % 360.0,
+                    head_length,
+                )
+                right_lat, right_lon = _bearing_endpoint(
+                    end_lat,
+                    end_lon,
+                    (flow_direction - 150.0) % 360.0,
+                    head_length,
+                )
 
-                arrows.append({
-                    "position": [longitude_value, latitude_value],
-                    "text": "➤",
-                    "angle": text_angle,
-                    "size": icon_size,
+                common = {
                     "wind_speed": round(speed_value, 2),
                     "wind_direction": round(direction_value, 1),
                     "distance": round(distance_values[index], 2),
+                    "metric": "Wind",
+                    "value": round(speed_value, 2),
+                }
+
+                shafts.append({
+                    **common,
+                    "source": [longitude_value, latitude_value],
+                    "target": [end_lon, end_lat],
                 })
+                heads.append({
+                    **common,
+                    "source": [end_lon, end_lat],
+                    "target": [left_lon, left_lat],
+                })
+                heads.append({
+                    **common,
+                    "source": [end_lon, end_lat],
+                    "target": [right_lon, right_lat],
+                })
+
                 next_distance = distance_values[index] + float(arrow_spacing_km)
 
-            if arrows:
+            if shafts:
                 layers.append(
                     pdk.Layer(
-                        "TextLayer",
-                        data=arrows,
-                        get_position="position",
-                        get_text="text",
-                        get_size="size",
-                        get_angle="angle",
+                        "LineLayer",
+                        data=shafts,
+                        get_source_position="source",
+                        get_target_position="target",
                         get_color=[20, 20, 20, 235],
-                        get_text_anchor="'middle'",
-                        get_alignment_baseline="'center'",
-                        billboard=True,
+                        get_width=4,
+                        width_min_pixels=3,
+                        pickable=True,
+                    )
+                )
+                layers.append(
+                    pdk.Layer(
+                        "LineLayer",
+                        data=heads,
+                        get_source_position="source",
+                        get_target_position="target",
+                        get_color=[20, 20, 20, 235],
+                        get_width=4,
+                        width_min_pixels=3,
                         pickable=True,
                     )
                 )
@@ -721,6 +763,42 @@ def render_colored_track_map(result: dict[str, Any]) -> None:
         tooltip=tooltip,
     )
     st.pydeck_chart(deck, use_container_width=True)
+
+    values_array = np.asarray(values, dtype=float)
+    finite_values = values_array[np.isfinite(values_array)]
+
+    if finite_values.size:
+        scale_min = float(np.nanpercentile(finite_values, 5))
+        scale_max = float(np.nanpercentile(finite_values, 95))
+        st.markdown(
+            f"""
+            <div style="margin-top:0.5rem; margin-bottom:0.75rem;">
+                <div style="
+                    height:18px;
+                    border-radius:9px;
+                    background:linear-gradient(
+                        90deg,
+                        rgb(30,90,220) 0%,
+                        rgb(50,230,140) 33%,
+                        rgb(250,210,40) 66%,
+                        rgb(250,50,20) 100%
+                    );
+                    border:1px solid rgba(0,0,0,0.25);
+                "></div>
+                <div style="
+                    display:flex;
+                    justify-content:space-between;
+                    font-size:0.85rem;
+                    margin-top:0.2rem;
+                ">
+                    <span>{scale_min:.2f}</span>
+                    <span><b>{selected_metric}</b></span>
+                    <span>{scale_max:.2f}</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     values_array = np.asarray(values, dtype=float)
     finite = values_array[np.isfinite(values_array)]

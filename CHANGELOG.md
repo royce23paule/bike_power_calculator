@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.12.2
+- Windpfeile als robuste LineLayer-Kombination mit sichtbarer Pfeilspitze
+- Pfeilschaft und zwei Pfeilkopfsegmente
+- Ungültige Startwerte werden weiterhin übersprungen
+- Farbskala unter der Karte ergänzt
+- Farbskala zeigt 5.- bis 95.-Perzentil der gewählten Größe
+- Keine Änderung der Berechnungsphysik
+
+
 ## 2.12.1
 - Alte HTML-Karte standardmäßig deaktiviert
 - Windlinien durch echte Richtungspfeile mit sichtbarer Spitze ersetzt
