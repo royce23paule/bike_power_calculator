@@ -23,6 +23,7 @@ from plotly.subplots import make_subplots
 import bike_power_calc as bpc
 from defaults import FIELDS, GROUP_TITLES, defaults_dict, ordered_values
 import re
+from datetime import datetime
 
 
 st.set_page_config(
@@ -72,7 +73,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "2.13.1"
+APP_VERSION = "2.13.2"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 

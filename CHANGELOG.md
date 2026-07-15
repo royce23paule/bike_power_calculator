@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.13.2
+- Behoben: fehlender `datetime`-Import in der Event-Datenbank
+- Zeitstempel für Event-Metadaten funktionieren wieder
+- Keine Änderung der Berechnungslogik
+
+
 ## 2.13.1
 - Behoben: fehlender `re`-Import in der Event-Datenbank
 - Event-IDs können wieder korrekt erzeugt werden
