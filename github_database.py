@@ -838,6 +838,191 @@ class GitHubDatabase:
             )
         return copied
 
+
+    def _calculation_path(
+        self,
+        event_id: str,
+        calculation_id: str,
+        filename: str,
+    ) -> str:
+        return (
+            f"{self.config.normalized_root}/Events/{event_id}/"
+            f"calculations/{calculation_id}/{filename}"
+        )
+
+    def save_calculation(
+        self,
+        event_id: str,
+        *,
+        name: str,
+        calculation_type: str,
+        settings: dict[str, Any],
+        result: dict[str, Any],
+        profiler: dict[str, Any] | None = None,
+        run_log: str = "",
+        pdf_content: bytes | None = None,
+        pdf_filename: str | None = None,
+        html_content: bytes | None = None,
+        html_filename: str | None = None,
+    ) -> dict[str, Any]:
+        calculation_id = uuid.uuid4().hex[:10]
+        now = datetime.now(timezone.utc).isoformat()
+        event = self.load_event(event_id)
+
+        metadata = {
+            "schema_version": 1,
+            "id": calculation_id,
+            "event_id": event_id,
+            "name": name.strip() or f"Berechnung {now[:19]}",
+            "type": calculation_type,
+            "created_at": now,
+            "app_version": result.get("app_version"),
+            "engine_version": result.get("engine_version"),
+            "summary": {
+                "title": result.get("title"),
+                "distance_km": result.get("distance_km"),
+                "duration_s": result.get("duration_s"),
+                "average_speed_kmh": result.get("average_speed_kmh"),
+                "average_power_w": (
+                    result.get("average_power_w")
+                    if result.get("average_power_w") is not None
+                    else result.get("calibration_ap")
+                ),
+                "normalized_power_w": (
+                    result.get("normalized_power_w")
+                    if result.get("normalized_power_w") is not None
+                    else result.get("calibration_np")
+                ),
+                "cda": result.get("calibration_cda"),
+            },
+            "files": [
+                "calculation.json",
+                "settings_snapshot.json",
+                "result.json",
+                "profiler.json",
+                "run_log.txt",
+            ],
+        }
+
+        if pdf_content is not None and pdf_filename:
+            metadata["files"].append(pdf_filename)
+        if html_content is not None and html_filename:
+            metadata["files"].append(html_filename)
+
+        base_path = (
+            f"{self.config.normalized_root}/Events/{event_id}/"
+            f"calculations/{calculation_id}"
+        )
+
+        payloads: list[tuple[str, bytes]] = [
+            (
+                f"{base_path}/calculation.json",
+                json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8"),
+            ),
+            (
+                f"{base_path}/settings_snapshot.json",
+                json.dumps(settings, ensure_ascii=False, indent=2).encode("utf-8"),
+            ),
+            (
+                f"{base_path}/result.json",
+                json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"),
+            ),
+            (
+                f"{base_path}/profiler.json",
+                json.dumps(profiler or {}, ensure_ascii=False, indent=2).encode("utf-8"),
+            ),
+            (
+                f"{base_path}/run_log.txt",
+                (run_log or "").encode("utf-8"),
+            ),
+        ]
+
+        if pdf_content is not None and pdf_filename:
+            payloads.append((f"{base_path}/{pdf_filename}", pdf_content))
+        if html_content is not None and html_filename:
+            payloads.append((f"{base_path}/{html_filename}", html_content))
+
+        # One clone/commit/push stores the complete calculation atomically.
+        repository_url = (
+            f"https://github.com/{self.config.owner}/{self.config.repo}.git"
+        )
+        with tempfile.TemporaryDirectory(prefix="bike-power-calc-") as temp_dir:
+            self._run_git(
+                [
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--branch",
+                    self.config.branch,
+                    repository_url,
+                    temp_dir,
+                ],
+                timeout_s=180,
+            )
+            for relative_path, content in payloads:
+                target = Path(temp_dir) / relative_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+
+            self._run_git(
+                ["config", "user.name", "Bike Power Calculator"],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                [
+                    "config",
+                    "user.email",
+                    "bike-power-calculator@users.noreply.github.com",
+                ],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                ["add", "--", base_path],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                [
+                    "commit",
+                    "-m",
+                    f"Save calculation: {metadata['name']} ({event.get('name')})",
+                ],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                ["pull", "--rebase", "origin", self.config.branch],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                ["push", "origin", f"HEAD:{self.config.branch}"],
+                cwd=temp_dir,
+                timeout_s=180,
+            )
+
+        return metadata
+
+    def list_calculations(self, event_id: str) -> list[dict[str, Any]]:
+        root = (
+            f"{self.config.normalized_root}/Events/{event_id}/calculations"
+        )
+        directories = self.list_directory(root)
+        calculations = []
+        for directory in directories:
+            if directory.get("type") != "dir":
+                continue
+            loaded = self.get_json(
+                f"{directory.get('path')}/calculation.json"
+            )
+            if loaded is None:
+                continue
+            metadata, _ = loaded
+            calculations.append(metadata)
+
+        calculations.sort(
+            key=lambda item: item.get("created_at", ""),
+            reverse=True,
+        )
+        return calculations
+
     def find_events_by_name(self, name: str) -> list[dict[str, Any]]:
         normalized = name.strip().casefold()
         return [

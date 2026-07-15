@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.2.0
+- Aktuelle Berechnung direkt in einem ausgewählten GitHub-Event speichern
+- Eigene UUID und frei wählbarer Name pro Berechnung
+- Speichert calculation.json, settings_snapshot.json, result.json, profiler.json und run_log.txt
+- Vorhandene PDF und HTML-Karte optional mitspeichern
+- Berechnungstyp wird automatisch erkannt
+- Ergebnisse und Arrays werden JSON-kompatibel serialisiert
+- Neue Events speichern immer automatisch die aktuellen vollständigen Einstellungen als settings.json
+- Anzahl gespeicherter Berechnungen wird beim Event angezeigt
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.1.7
 - Behoben: fehlender `Path`-Import im Git-Commit/Push-Dateiweg
 - Git-CLI-Abhängigkeiten statisch geprüft

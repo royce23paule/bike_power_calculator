@@ -74,7 +74,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.1.7"
+APP_VERSION = "3.2.0"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -1204,6 +1204,182 @@ def html_map_viewer(map_path: Path, height: int = 650) -> None:
         st.components.v1.html(map_path.read_text(encoding="latin-1"), height=height)
 
 
+
+def _json_safe_value(value: Any, max_sequence_items: int = 20000) -> Any:
+    """Converts calculation data to a GitHub-storable JSON representation."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, Path):
+        return str(value)
+
+    if isinstance(value, dict):
+        return {
+            str(key): _json_safe_value(item, max_sequence_items)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, (list, tuple)):
+        values = list(value)
+        if len(values) > max_sequence_items:
+            step = max(1, len(values) // max_sequence_items)
+            values = values[::step]
+        return [
+            _json_safe_value(item, max_sequence_items)
+            for item in values
+        ]
+
+    try:
+        if isinstance(value, np.ndarray):
+            values = value
+            if value.size > max_sequence_items:
+                step = max(1, value.size // max_sequence_items)
+                values = value.reshape(-1)[::step]
+            return values.tolist()
+    except Exception:
+        pass
+
+    try:
+        if hasattr(value, "item"):
+            return value.item()
+    except Exception:
+        pass
+
+    return str(value)
+
+
+def build_calculation_result_snapshot(result: dict[str, Any]) -> dict[str, Any]:
+    """Creates a reproducible result snapshot without transient local paths."""
+    excluded_keys = {
+        "pdf_path",
+        "map_path",
+    }
+    snapshot = {
+        key: _json_safe_value(value)
+        for key, value in result.items()
+        if key not in excluded_keys
+    }
+    snapshot["app_version"] = APP_VERSION
+    snapshot["engine_version"] = ENGINE_VERSION
+    snapshot["saved_at"] = datetime.now().isoformat(timespec="seconds")
+    return snapshot
+
+
+def infer_calculation_type(result: dict[str, Any], config: dict[str, Any]) -> str:
+    route_path = str(config.get("GPX/FIT Datei", "")).lower()
+    target_speed = result.get("calibration_target_speed_kmh")
+    try:
+        if route_path.endswith(".fit") and float(target_speed) > 0:
+            return "fit_cda_calibration"
+    except (TypeError, ValueError):
+        pass
+    if route_path.endswith(".fit"):
+        return "fit_analysis"
+    return "route_simulation"
+
+
+def render_save_calculation_to_github(
+    result: dict[str, Any],
+    run_log: str,
+    profile: dict[str, Any] | None,
+) -> None:
+    db = get_github_database()
+    selected_event_id = st.session_state.get(
+        "github_database_selected_event"
+    )
+
+    with st.expander("Aktuelle Berechnung im GitHub-Event speichern", expanded=False):
+        if db is None:
+            st.info("Die GitHub-Datenbank ist nicht konfiguriert.")
+            return
+        if not selected_event_id:
+            st.info(
+                "Bitte zuerst links unter GitHub-Datenbank ein Event auswählen."
+            )
+            return
+
+        try:
+            event = db.load_event(selected_event_id)
+        except GitHubDatabaseError as exc:
+            st.error(str(exc))
+            return
+
+        st.caption(f"Ziel-Event: {event.get('name', selected_event_id)}")
+
+        default_name = (
+            f"{result.get('title', 'Berechnung')} · "
+            f"{datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        )
+        calculation_name = st.text_input(
+            "Name der Berechnung",
+            value=default_name,
+            key="github_calculation_name",
+        )
+
+        include_pdf = st.checkbox(
+            "Vorhandene PDF mitspeichern",
+            value=True,
+            key="github_calculation_include_pdf",
+        )
+        include_html = st.checkbox(
+            "Vorhandene HTML-Karte mitspeichern",
+            value=True,
+            key="github_calculation_include_html",
+        )
+
+        if st.button(
+            "Berechnung jetzt speichern",
+            key="github_save_current_calculation",
+            type="primary",
+            use_container_width=True,
+        ):
+            pdf_content = None
+            pdf_filename = None
+            html_content = None
+            html_filename = None
+
+            pdf_path_value = result.get("pdf_path")
+            if include_pdf and pdf_path_value:
+                pdf_path = Path(pdf_path_value)
+                if pdf_path.exists():
+                    pdf_content = pdf_path.read_bytes()
+                    pdf_filename = pdf_path.name
+
+            map_path_value = result.get("map_path")
+            if include_html and map_path_value:
+                map_path = Path(map_path_value)
+                if map_path.exists():
+                    html_content = map_path.read_bytes()
+                    html_filename = map_path.name
+
+            try:
+                with st.spinner("Berechnung wird auf GitHub gespeichert …"):
+                    metadata = db.save_calculation(
+                        selected_event_id,
+                        name=calculation_name,
+                        calculation_type=infer_calculation_type(
+                            result,
+                            st.session_state.config,
+                        ),
+                        settings=_json_safe_value(
+                            dict(st.session_state.config)
+                        ),
+                        result=build_calculation_result_snapshot(result),
+                        profiler=_json_safe_value(profile or {}),
+                        run_log=run_log or result.get("run_log", ""),
+                        pdf_content=pdf_content,
+                        pdf_filename=pdf_filename,
+                        html_content=html_content,
+                        html_filename=html_filename,
+                    )
+                st.success(
+                    f"Berechnung „{metadata['name']}“ wurde gespeichert."
+                )
+                st.caption(f"Berechnungs-ID: {metadata['id']}")
+            except (GitHubDatabaseError, TypeError, ValueError) as exc:
+                st.error(f"Berechnung konnte nicht gespeichert werden: {exc}")
+
+
 def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[str, float] | None = None) -> None:
     if not result:
         return
@@ -1237,6 +1413,8 @@ def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[st
         "Normalized Power",
         "—" if normalized_power is None else f"{float(normalized_power):.2f} W",
     )
+
+    render_save_calculation_to_github(result, run_log, profile)
 
     pdf_path_value = result.get("pdf_path")
     map_path_value = result.get("map_path")
@@ -1924,6 +2102,15 @@ root_path = "Database"
                     f"{selected_event.get('sport') or '—'} · "
                     f"{', '.join(selected_event.get('tags', [])) or 'keine Tags'}"
                 )
+
+                try:
+                    saved_calculations = db.list_calculations(selected_id)
+                    if saved_calculations:
+                        st.caption(
+                            f"Gespeicherte Berechnungen: {len(saved_calculations)}"
+                        )
+                except GitHubDatabaseError:
+                    pass
             except GitHubDatabaseError as exc:
                 st.error(str(exc))
 
@@ -1964,9 +2151,9 @@ root_path = "Database"
             )
             tags_text = st.text_input("Tags, durch Kommas getrennt")
             notes = st.text_area("Notizen")
-            save_current_settings = st.checkbox(
-                "Aktuelle vollständige Einstellungen als settings.json speichern",
-                value=True,
+            st.caption(
+                "Die aktuellen vollständigen Einstellungen werden automatisch "
+                "als settings.json gespeichert."
             )
             submitted = st.form_submit_button("Auf GitHub anlegen")
 
@@ -1989,7 +2176,7 @@ root_path = "Database"
                         sport=sport,
                         tags=[tag.strip() for tag in tags_text.split(",") if tag.strip()],
                         notes=notes,
-                        settings=dict(st.session_state.config) if save_current_settings else {},
+                        settings=dict(st.session_state.config),
                     )
                     st.session_state.github_database_selected_event = event["id"]
                     st.success(f"Event „{event['name']}“ wurde angelegt.")
