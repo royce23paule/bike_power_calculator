@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.5
+- Teilgröße für FIT/GPX von 384 KB auf 48 KB reduziert
+- Uploadstatus zeigt geschätzte Anzahl der Dateiteile
+- Fehlermeldung nennt den konkret betroffenen Teil und dessen Größe
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.1.4
 - FIT/GPX werden in kleine Teile von 384 KB zerlegt
 - Jeder Teil wird separat über die bewährte Contents-API gespeichert

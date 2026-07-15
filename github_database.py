@@ -335,7 +335,7 @@ class GitHubDatabase:
         }
 
 
-    CHUNK_SIZE_BYTES = 384 * 1024
+    CHUNK_SIZE_BYTES = 48 * 1024
 
     def _chunk_directory_path(self, event_id: str, filename: str) -> str:
         safe_name = filename.split("/")[-1]
@@ -380,12 +380,19 @@ class GitHubDatabase:
             chunk_path = f"{chunk_dir}/{chunk_name}"
             existing = self.get_file(chunk_path)
             existing_sha = existing[1] if existing else None
-            self.put_file(
-                chunk_path,
-                chunk,
-                f"{message} · chunk {index + 1}/{len(chunks)}",
-                existing_sha,
-            )
+            try:
+                self.put_file(
+                    chunk_path,
+                    chunk,
+                    f"{message} · chunk {index + 1}/{len(chunks)}",
+                    existing_sha,
+                )
+            except GitHubDatabaseError as exc:
+                raise GitHubDatabaseError(
+                    f"Mehrteiliger Upload fehlgeschlagen bei Teil "
+                    f"{index + 1}/{len(chunks)} "
+                    f"({len(chunk)} Bytes): {exc}"
+                ) from exc
 
         manifest = {
             "schema_version": 1,
