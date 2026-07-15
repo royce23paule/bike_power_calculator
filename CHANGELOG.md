@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.1.4
+- FIT/GPX werden in kleine Teile von 384 KB zerlegt
+- Jeder Teil wird separat über die bewährte Contents-API gespeichert
+- Manifest speichert Dateiname, Größe, Prüfsumme und Reihenfolge
+- Dateien werden beim Laden transparent zusammengesetzt und geprüft
+- Dateiliste zeigt mehrteilige Dateien als eine logische Datei
+- Mehrteilige Dateien können vollständig gelöscht und dupliziert werden
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.1.3
 - Stufengenaue Diagnose für Git-Blob-Uploads
 - Fehler unterscheiden Blob, Tree, Commit und Branch-Update

@@ -74,7 +74,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.1.3"
+APP_VERSION = "3.1.4"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -2119,9 +2119,9 @@ root_path = "Database"
                         size_mb = len(content) / (1024 * 1024)
                         suffix = Path(uploaded.name).suffix.lower()
                         upload_mode = (
-                            "Git-Blob"
-                            if suffix in {".fit", ".gpx"} or len(content) >= 750 * 1024
-                            else "Contents API"
+                            "mehrteiliger Upload"
+                            if suffix in {".fit", ".gpx"} or len(content) > 384 * 1024
+                            else "direkter Upload"
                         )
                         upload_status.info(
                             f"Lade {uploaded.name} hoch "
@@ -2149,9 +2149,15 @@ root_path = "Database"
             else:
                 file_df = pd.DataFrame(files)
                 file_df["size_kb"] = file_df["size"].fillna(0) / 1024
+                if "storage" not in file_df.columns:
+                    file_df["storage"] = "direct"
                 st.dataframe(
-                    file_df[["name", "size_kb"]].rename(
-                        columns={"name": "Datei", "size_kb": "Größe [KB]"}
+                    file_df[["name", "size_kb", "storage"]].rename(
+                        columns={
+                            "name": "Datei",
+                            "size_kb": "Größe [KB]",
+                            "storage": "Speicherung",
+                        }
                     ),
                     use_container_width=True,
                     hide_index=True,
@@ -2222,9 +2228,9 @@ root_path = "Database"
                         use_container_width=True,
                     ):
                         try:
-                            db.delete_file(
-                                db._event_path(selected_id, selected_file),
-                                f"Delete {selected_file} from event {selected_id}",
+                            db.delete_event_file(
+                                selected_id,
+                                selected_file,
                             )
                             st.success(f"{selected_file} wurde gelöscht.")
                             st.rerun()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import hashlib
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -333,6 +334,122 @@ class GitHubDatabase:
             "blob_sha": blob_sha,
         }
 
+
+    CHUNK_SIZE_BYTES = 384 * 1024
+
+    def _chunk_directory_path(self, event_id: str, filename: str) -> str:
+        safe_name = filename.split("/")[-1]
+        return (
+            f"{self.config.normalized_root}/Events/{event_id}/"
+            f".chunks/{quote(safe_name, safe='')}"
+        )
+
+    def _chunk_manifest_path(self, event_id: str, filename: str) -> str:
+        return f"{self._chunk_directory_path(event_id, filename)}/manifest.json"
+
+    def _is_chunked_file(self, event_id: str, filename: str) -> bool:
+        return self.get_file(self._chunk_manifest_path(event_id, filename)) is not None
+
+    def _save_chunked_file(
+        self,
+        event_id: str,
+        filename: str,
+        content: bytes,
+        message: str,
+    ) -> None:
+        safe_name = filename.split("/")[-1]
+        chunk_dir = self._chunk_directory_path(event_id, safe_name)
+        chunks = [
+            content[offset: offset + self.CHUNK_SIZE_BYTES]
+            for offset in range(0, len(content), self.CHUNK_SIZE_BYTES)
+        ]
+
+        # Existing chunks may be overwritten safely. Obsolete trailing chunks
+        # from an older larger version are removed after the new manifest exists.
+        existing_items = self.list_directory(chunk_dir)
+        existing_names = {
+            item.get("name")
+            for item in existing_items
+            if item.get("type") == "file"
+        }
+
+        chunk_names = []
+        for index, chunk in enumerate(chunks):
+            chunk_name = f"part-{index:05d}.bin"
+            chunk_names.append(chunk_name)
+            chunk_path = f"{chunk_dir}/{chunk_name}"
+            existing = self.get_file(chunk_path)
+            existing_sha = existing[1] if existing else None
+            self.put_file(
+                chunk_path,
+                chunk,
+                f"{message} · chunk {index + 1}/{len(chunks)}",
+                existing_sha,
+            )
+
+        manifest = {
+            "schema_version": 1,
+            "storage": "chunked",
+            "filename": safe_name,
+            "size_bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "chunk_size_bytes": self.CHUNK_SIZE_BYTES,
+            "chunks": chunk_names,
+        }
+        manifest_path = self._chunk_manifest_path(event_id, safe_name)
+        existing_manifest = self.get_json(manifest_path)
+        manifest_sha = existing_manifest[1] if existing_manifest else None
+        self.put_json(
+            manifest_path,
+            manifest,
+            f"{message} · manifest",
+            manifest_sha,
+        )
+
+        # Remove chunks no longer referenced by the current manifest.
+        for old_name in existing_names:
+            if old_name == "manifest.json" or old_name in chunk_names:
+                continue
+            self.delete_file(
+                f"{chunk_dir}/{old_name}",
+                f"Remove obsolete chunk {old_name} for {safe_name}",
+            )
+
+    def _load_chunked_file(self, event_id: str, filename: str) -> bytes:
+        loaded_manifest = self.get_json(
+            self._chunk_manifest_path(event_id, filename)
+        )
+        if loaded_manifest is None:
+            raise GitHubDatabaseError(
+                f"Manifest für {filename} wurde nicht gefunden."
+            )
+
+        manifest, _ = loaded_manifest
+        content_parts = []
+        chunk_dir = self._chunk_directory_path(event_id, filename)
+        for chunk_name in manifest.get("chunks", []):
+            loaded = self.get_file(f"{chunk_dir}/{chunk_name}")
+            if loaded is None:
+                raise GitHubDatabaseError(
+                    f"Dateiteil {chunk_name} für {filename} fehlt."
+                )
+            content_parts.append(loaded[0])
+
+        content = b"".join(content_parts)
+        expected_size = int(manifest.get("size_bytes", -1))
+        expected_hash = str(manifest.get("sha256", ""))
+
+        if expected_size >= 0 and len(content) != expected_size:
+            raise GitHubDatabaseError(
+                f"Dateigröße von {filename} stimmt nach dem Laden nicht."
+            )
+        if expected_hash and hashlib.sha256(content).hexdigest() != expected_hash:
+            raise GitHubDatabaseError(
+                f"Prüfsumme von {filename} stimmt nach dem Laden nicht."
+            )
+        return content
+
+
     def save_event_file(
         self,
         event_id: str,
@@ -343,32 +460,40 @@ class GitHubDatabase:
         safe_name = filename.split("/")[-1]
         path = self._event_path(event_id, safe_name)
         commit_message = message or f"Save {safe_name} for event {event_id}"
-
-        # Binary FIT/GPX files always use Git blobs/trees/commits.
-        # This avoids invalid-request errors from the Contents API even when
-        # the binary file itself is smaller than the size threshold.
         suffix = safe_name.lower().rsplit(".", 1)[-1] if "." in safe_name else ""
-        use_git_data_api = suffix in {"fit", "gpx"} or len(content) >= 750 * 1024
 
-        if use_git_data_api:
-            self.put_file_via_git_data(
-                path=path,
-                content=content,
-                message=commit_message,
+        # FIT/GPX and larger files are split into small repository files.
+        # This avoids large Base64 JSON requests being rejected upstream.
+        use_chunked_storage = (
+            suffix in {"fit", "gpx"}
+            or len(content) > self.CHUNK_SIZE_BYTES
+        )
+        if use_chunked_storage:
+            self._save_chunked_file(
+                event_id,
+                safe_name,
+                content,
+                commit_message,
             )
+            # Remove an earlier direct representation, if present.
+            direct = self.get_file(path)
+            if direct is not None:
+                self.delete_file(
+                    path,
+                    f"Replace direct file with chunked storage: {safe_name}",
+                )
             return
 
         existing = self.get_file(path)
         existing_sha = existing[1] if existing else None
-        self.put_file(
-            path,
-            content,
-            commit_message,
-            existing_sha,
-        )
+        self.put_file(path, content, commit_message, existing_sha)
 
     def load_event_file(self, event_id: str, filename: str) -> bytes:
         safe_name = filename.split("/")[-1]
+
+        if self._is_chunked_file(event_id, safe_name):
+            return self._load_chunked_file(event_id, safe_name)
+
         loaded = self.get_file(self._event_path(event_id, safe_name))
         if loaded is None:
             raise GitHubDatabaseError(
@@ -379,7 +504,8 @@ class GitHubDatabase:
     def list_event_files(self, event_id: str) -> list[dict[str, Any]]:
         path = f"{self.config.normalized_root}/Events/{event_id}"
         items = self.list_directory(path)
-        return [
+
+        result = [
             {
                 "name": item.get("name"),
                 "path": item.get("path"),
@@ -387,10 +513,55 @@ class GitHubDatabase:
                 "type": item.get("type"),
                 "sha": item.get("sha"),
                 "download_url": item.get("download_url"),
+                "storage": "direct",
             }
             for item in items
             if item.get("type") == "file"
         ]
+
+        chunks_root = f"{path}/.chunks"
+        chunk_directories = self.list_directory(chunks_root)
+        for directory in chunk_directories:
+            if directory.get("type") != "dir":
+                continue
+            manifest_path = f"{directory.get('path')}/manifest.json"
+            loaded = self.get_json(manifest_path)
+            if loaded is None:
+                continue
+            manifest, _ = loaded
+            result.append(
+                {
+                    "name": manifest.get("filename", directory.get("name")),
+                    "path": directory.get("path"),
+                    "size": manifest.get("size_bytes", 0),
+                    "type": "file",
+                    "sha": manifest.get("sha256"),
+                    "download_url": None,
+                    "storage": "chunked",
+                }
+            )
+
+        result.sort(key=lambda item: str(item.get("name", "")).lower())
+        return result
+
+
+    def delete_event_file(self, event_id: str, filename: str) -> None:
+        safe_name = filename.split("/")[-1]
+
+        if self._is_chunked_file(event_id, safe_name):
+            chunk_dir = self._chunk_directory_path(event_id, safe_name)
+            for item in self.list_directory(chunk_dir):
+                if item.get("type") == "file":
+                    self.delete_file(
+                        item["path"],
+                        f"Delete chunked file {safe_name}",
+                    )
+            return
+
+        self.delete_file(
+            self._event_path(event_id, safe_name),
+            f"Delete {safe_name} from event {event_id}",
+        )
 
     def update_event(
         self,
