@@ -210,6 +210,89 @@ class GitHubDatabase:
         payload = response.json()
         return payload if isinstance(payload, list) else []
 
+
+    def _git_url(self, suffix: str) -> str:
+        return f"{self._repo_url()}/git/{suffix.lstrip('/')}"
+
+    def _get_branch_commit_and_tree(self) -> tuple[str, str]:
+        ref_response = self._request(
+            "GET",
+            self._git_url(f"ref/heads/{quote(self.config.branch, safe='')}"),
+        )
+        commit_sha = ref_response.json()["object"]["sha"]
+
+        commit_response = self._request(
+            "GET",
+            self._git_url(f"commits/{commit_sha}"),
+        )
+        tree_sha = commit_response.json()["tree"]["sha"]
+        return commit_sha, tree_sha
+
+    def put_file_via_git_data(
+        self,
+        path: str,
+        content: bytes,
+        message: str,
+    ) -> dict[str, Any]:
+        """Writes a file by creating a blob, tree and commit.
+
+        This is more robust than the repository contents endpoint for larger
+        binary FIT/GPX files because the file is written as a raw Git object.
+        """
+        commit_sha, base_tree_sha = self._get_branch_commit_and_tree()
+
+        blob_response = self._request(
+            "POST",
+            self._git_url("blobs"),
+            json={
+                "content": base64.b64encode(content).decode("ascii"),
+                "encoding": "base64",
+            },
+        )
+        blob_sha = blob_response.json()["sha"]
+
+        tree_response = self._request(
+            "POST",
+            self._git_url("trees"),
+            json={
+                "base_tree": base_tree_sha,
+                "tree": [
+                    {
+                        "path": path.strip("/"),
+                        "mode": "100644",
+                        "type": "blob",
+                        "sha": blob_sha,
+                    }
+                ],
+            },
+        )
+        new_tree_sha = tree_response.json()["sha"]
+
+        commit_response = self._request(
+            "POST",
+            self._git_url("commits"),
+            json={
+                "message": message,
+                "tree": new_tree_sha,
+                "parents": [commit_sha],
+            },
+        )
+        new_commit_sha = commit_response.json()["sha"]
+
+        ref_response = self._request(
+            "PATCH",
+            self._git_url(f"refs/heads/{quote(self.config.branch, safe='')}"),
+            json={
+                "sha": new_commit_sha,
+                "force": False,
+            },
+        )
+        return {
+            "commit": commit_response.json(),
+            "ref": ref_response.json(),
+            "blob_sha": blob_sha,
+        }
+
     def save_event_file(
         self,
         event_id: str,
@@ -219,12 +302,24 @@ class GitHubDatabase:
     ) -> None:
         safe_name = filename.split("/")[-1]
         path = self._event_path(event_id, safe_name)
+        commit_message = message or f"Save {safe_name} for event {event_id}"
+
+        # The repository contents endpoint is convenient for small text files.
+        # Larger binary files use Git blobs/trees/commits instead.
+        if len(content) >= 750 * 1024:
+            self.put_file_via_git_data(
+                path=path,
+                content=content,
+                message=commit_message,
+            )
+            return
+
         existing = self.get_file(path)
         existing_sha = existing[1] if existing else None
         self.put_file(
             path,
             content,
-            message or f"Save {safe_name} for event {event_id}",
+            commit_message,
             existing_sha,
         )
 
@@ -246,6 +341,8 @@ class GitHubDatabase:
                 "path": item.get("path"),
                 "size": item.get("size", 0),
                 "type": item.get("type"),
+                "sha": item.get("sha"),
+                "download_url": item.get("download_url"),
             }
             for item in items
             if item.get("type") == "file"

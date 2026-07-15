@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.1
+- Robuster Upload größerer FIT-/GPX-Dateien über Git-Blobs, Trees und Commits
+- Kleine JSON-/CSV-Dateien nutzen weiterhin die Contents-API
+- Automatische Umschaltung ab 750 KB
+- Uploadstatus zeigt Dateiname, Größe und Fortschritt
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.1.0
 - Vollständige GitHub-Eventverwaltung
 - Doppelte Eventnamen werden erkannt und angezeigt
