@@ -178,6 +178,219 @@ class GitHubDatabase:
             raise GitHubDatabaseError(f"Event {event_id} wurde nicht gefunden.")
         return loaded[0]
 
+
+    def delete_file(self, path: str, message: str) -> None:
+        loaded = self.get_file(path)
+        if loaded is None:
+            return
+        _, sha = loaded
+        payload = {
+            "message": message,
+            "sha": sha,
+            "branch": self.config.branch,
+        }
+        self._request("DELETE", self._contents_url(path), json=payload)
+
+    def list_directory(self, path: str) -> list[dict[str, Any]]:
+        response = self.session.get(
+            self._contents_url(path),
+            params={"ref": self.config.branch},
+            timeout=self.timeout_s,
+        )
+        if response.status_code == 404:
+            return []
+        if response.status_code >= 400:
+            try:
+                message = response.json().get("message", response.text)
+            except Exception:
+                message = response.text
+            raise GitHubDatabaseError(
+                f"GitHub API {response.status_code}: {message}"
+            )
+        payload = response.json()
+        return payload if isinstance(payload, list) else []
+
+    def save_event_file(
+        self,
+        event_id: str,
+        filename: str,
+        content: bytes,
+        message: str | None = None,
+    ) -> None:
+        safe_name = filename.split("/")[-1]
+        path = self._event_path(event_id, safe_name)
+        existing = self.get_file(path)
+        existing_sha = existing[1] if existing else None
+        self.put_file(
+            path,
+            content,
+            message or f"Save {safe_name} for event {event_id}",
+            existing_sha,
+        )
+
+    def load_event_file(self, event_id: str, filename: str) -> bytes:
+        safe_name = filename.split("/")[-1]
+        loaded = self.get_file(self._event_path(event_id, safe_name))
+        if loaded is None:
+            raise GitHubDatabaseError(
+                f"Datei {safe_name} wurde im Event nicht gefunden."
+            )
+        return loaded[0]
+
+    def list_event_files(self, event_id: str) -> list[dict[str, Any]]:
+        path = f"{self.config.normalized_root}/Events/{event_id}"
+        items = self.list_directory(path)
+        return [
+            {
+                "name": item.get("name"),
+                "path": item.get("path"),
+                "size": item.get("size", 0),
+                "type": item.get("type"),
+            }
+            for item in items
+            if item.get("type") == "file"
+        ]
+
+    def update_event(
+        self,
+        event_id: str,
+        *,
+        name: str,
+        event_date: str = "",
+        location: str = "",
+        sport: str = "Triathlon",
+        tags: list[str] | None = None,
+        notes: str = "",
+        settings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        loaded = self.get_json(self._event_path(event_id, "event.json"))
+        if loaded is None:
+            raise GitHubDatabaseError(f"Event {event_id} wurde nicht gefunden.")
+
+        event, event_sha = loaded
+        now = datetime.now(timezone.utc).isoformat()
+        event.update(
+            {
+                "name": name.strip(),
+                "date": event_date,
+                "location": location.strip(),
+                "sport": sport.strip(),
+                "tags": tags or [],
+                "notes": notes.strip(),
+                "updated_at": now,
+            }
+        )
+        self.put_json(
+            self._event_path(event_id, "event.json"),
+            event,
+            f"Update event: {event['name']}",
+            event_sha,
+        )
+
+        if settings is not None:
+            settings_path = self._event_path(event_id, "settings.json")
+            existing = self.get_json(settings_path)
+            settings_sha = existing[1] if existing else None
+            self.put_json(
+                settings_path,
+                settings,
+                f"Update settings for event: {event['name']}",
+                settings_sha,
+            )
+
+        index, index_sha = self.load_index()
+        for entry in index.get("events", []):
+            if entry.get("id") == event_id:
+                entry.update(
+                    {
+                        "name": event["name"],
+                        "date": event["date"],
+                        "location": event["location"],
+                        "sport": event["sport"],
+                        "tags": event["tags"],
+                        "updated_at": now,
+                    }
+                )
+                break
+        index["events"].sort(
+            key=lambda item: (
+                item.get("date") or "",
+                item.get("name") or "",
+            ),
+            reverse=True,
+        )
+        index["updated_at"] = now
+        self.put_json(
+            self.index_path,
+            index,
+            f"Update database index: edit {event['name']}",
+            index_sha,
+        )
+        return event
+
+    def delete_event(self, event_id: str) -> None:
+        event = self.load_event(event_id)
+        path = f"{self.config.normalized_root}/Events/{event_id}"
+        items = self.list_directory(path)
+
+        # Files must be deleted one by one through GitHub Contents API.
+        for item in items:
+            if item.get("type") == "file":
+                self.delete_file(
+                    item["path"],
+                    f"Delete {item.get('name')} from event {event.get('name')}",
+                )
+
+        index, index_sha = self.load_index()
+        index["events"] = [
+            entry for entry in index.get("events", [])
+            if entry.get("id") != event_id
+        ]
+        index["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self.put_json(
+            self.index_path,
+            index,
+            f"Update database index: delete {event.get('name')}",
+            index_sha,
+        )
+
+    def duplicate_event(
+        self,
+        event_id: str,
+        new_name: str | None = None,
+    ) -> dict[str, Any]:
+        source_event = self.load_event(event_id)
+        source_settings = self.load_settings(event_id)
+        copied = self.create_event(
+            name=new_name or f"{source_event.get('name', 'Event')} (Kopie)",
+            event_date=source_event.get("date", ""),
+            location=source_event.get("location", ""),
+            sport=source_event.get("sport", "Triathlon"),
+            tags=list(source_event.get("tags", [])),
+            notes=source_event.get("notes", ""),
+            settings=source_settings,
+        )
+
+        for file_info in self.list_event_files(event_id):
+            filename = file_info.get("name")
+            if filename in {"event.json", "settings.json"}:
+                continue
+            content = self.load_event_file(event_id, filename)
+            self.save_event_file(
+                copied["id"],
+                filename,
+                content,
+                f"Copy {filename} to duplicated event {copied['name']}",
+            )
+        return copied
+
+    def find_events_by_name(self, name: str) -> list[dict[str, Any]]:
+        normalized = name.strip().casefold()
+        return [
+            event for event in self.list_events()
+            if str(event.get("name", "")).strip().casefold() == normalized
+        ]
+
     def load_settings(self, event_id: str) -> dict[str, Any]:
         loaded = self.get_json(self._event_path(event_id, "settings.json"))
         return {} if loaded is None else loaded[0]

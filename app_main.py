@@ -74,7 +74,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.1.0"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -1828,81 +1828,389 @@ def get_github_database() -> GitHubDatabase | None:
     return None if config is None else GitHubDatabase(config)
 
 
+
 def render_github_database_sidebar() -> None:
     db = get_github_database()
+
     st.divider()
     st.subheader("☁️ GitHub-Datenbank")
+
     if db is None:
         st.warning("GitHub-Datenbank ist noch nicht konfiguriert.")
-        example = "[github_database]\ntoken = \"github_pat_...\"\nowner = \"DEIN_GITHUB_NAME\"\nrepo = \"bike-power-database\"\nbranch = \"main\"\nroot_path = \"Database\""
-        st.code(example, language="toml")
-        st.caption("Auf Streamlit Cloud unter Manage app → Settings → Secrets eintragen.")
+        st.code(
+            """[github_database]
+token = "github_pat_..."
+owner = "DEIN_GITHUB_NAME"
+repo = "bike-power-database"
+branch = "main"
+root_path = "Database"
+""",
+            language="toml",
+        )
         return
-    st.caption(f"{db.config.owner}/{db.config.repo} · Branch {db.config.branch}")
-    c1, c2 = st.columns(2)
-    if c1.button("Verbindung testen", key="github_db_test", use_container_width=True):
+
+    config = db.config
+    st.caption(f"{config.owner}/{config.repo} · Branch {config.branch}")
+
+    connection_col, init_col = st.columns(2)
+    if connection_col.button("Verbindung testen", key="github_db_test", use_container_width=True):
         try:
             info = db.test_connection()
-            visibility = "privat" if info.get("private") else "öffentlich"
-            st.success(f"Verbunden mit {info.get('full_name')} · {visibility}")
+            st.success(
+                f"Verbunden mit {info.get('full_name')} · "
+                f"{'Privat' if info.get('private') else 'Öffentlich'}"
+            )
         except GitHubDatabaseError as exc:
             st.error(str(exc))
-    if c2.button("Initialisieren", key="github_db_init", use_container_width=True):
+
+    if init_col.button("Initialisieren", key="github_db_initialize", use_container_width=True):
         try:
             db.initialize()
             st.success("Database/index.json ist vorhanden.")
             st.rerun()
         except GitHubDatabaseError as exc:
             st.error(str(exc))
+
     try:
         events = db.list_events()
     except GitHubDatabaseError as exc:
         st.error(str(exc))
         return
-    search = st.text_input("GitHub-Events suchen", key="github_db_search").strip().lower()
-    events = [e for e in events if not search or search in " ".join([
-        str(e.get("name", "")), str(e.get("date", "")), str(e.get("location", "")),
-        " ".join(e.get("tags", []))]).lower()]
-    if events:
-        labels = {f"{e.get('name', e.get('id'))} · {e.get('date') or 'ohne Datum'}": e.get('id') for e in events}
-        label = st.selectbox("GitHub-Event auswählen", list(labels), key="github_db_event")
-        event_id = labels[label]
-        if st.button("Einstellungen laden", key="github_db_load", use_container_width=True):
+
+    tabs = st.tabs(["Events", "Neu", "Bearbeiten", "Dateien"])
+
+    with tabs[0]:
+        search = st.text_input("Suchen", key="github_database_search").strip().lower()
+        filtered = []
+        for event in events:
+            searchable = " ".join(
+                [
+                    str(event.get("name", "")),
+                    str(event.get("date", "")),
+                    str(event.get("location", "")),
+                    str(event.get("sport", "")),
+                    " ".join(event.get("tags", [])),
+                ]
+            ).lower()
+            if not search or search in searchable:
+                filtered.append(event)
+
+        if not filtered:
+            st.info("Keine passenden Events vorhanden.")
+        else:
+            labels = {}
+            for event in filtered:
+                base_label = (
+                    f"{event.get('name', event.get('id'))} · "
+                    f"{event.get('date') or 'ohne Datum'}"
+                )
+                label = base_label
+                if label in labels:
+                    label = f"{base_label} · {event.get('id')}"
+                labels[label] = event.get("id")
+
+            selected_label = st.selectbox(
+                "Event auswählen",
+                list(labels.keys()),
+                key="github_database_selected_label",
+            )
+            selected_id = labels[selected_label]
+            st.session_state.github_database_selected_event = selected_id
+
             try:
-                cfg = normalize_loaded_config(db.load_settings(event_id))
-                st.session_state.config = cfg
-                sync_widgets_from_config(cfg)
-                st.success("settings.json geladen.")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Laden fehlgeschlagen: {exc}")
-    else:
-        st.info("Noch keine GitHub-Events vorhanden.")
-    with st.expander("Neues GitHub-Event", expanded=False):
-        with st.form("github_db_new_event"):
+                selected_event = db.load_event(selected_id)
+                st.caption(
+                    f"{selected_event.get('location') or '—'} · "
+                    f"{selected_event.get('sport') or '—'} · "
+                    f"{', '.join(selected_event.get('tags', [])) or 'keine Tags'}"
+                )
+            except GitHubDatabaseError as exc:
+                st.error(str(exc))
+
+            load_cols = st.columns(2)
+            if load_cols[0].button(
+                "Einstellungen laden",
+                key="github_db_load_settings",
+                use_container_width=True,
+            ):
+                try:
+                    settings = db.load_settings(selected_id)
+                    loaded_config = normalize_loaded_config(settings)
+                    st.session_state.config = loaded_config
+                    sync_widgets_from_config(loaded_config)
+                    st.success("settings.json wurde geladen.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Einstellungen konnten nicht geladen werden: {exc}")
+
+            if load_cols[1].button(
+                "Metadaten anzeigen",
+                key="github_db_show_event",
+                use_container_width=True,
+            ):
+                try:
+                    st.json(db.load_event(selected_id))
+                except GitHubDatabaseError as exc:
+                    st.error(str(exc))
+
+    with tabs[1]:
+        with st.form("github_database_new_event_form"):
             name = st.text_input("Eventname")
             event_date = st.date_input("Eventdatum", value=None)
             location = st.text_input("Ort")
-            sport = st.selectbox("Eventtyp", ["Triathlon", "Radrennen", "Training", "Strecke", "Sonstiges"])
-            tags = st.text_input("Tags, durch Kommas getrennt")
+            sport = st.selectbox(
+                "Eventtyp",
+                ["Triathlon", "Radrennen", "Training", "Strecke", "Sonstiges"],
+            )
+            tags_text = st.text_input("Tags, durch Kommas getrennt")
             notes = st.text_area("Notizen")
-            save_settings = st.checkbox("Aktuelle Einstellungen als settings.json speichern", value=True)
+            save_current_settings = st.checkbox(
+                "Aktuelle vollständige Einstellungen als settings.json speichern",
+                value=True,
+            )
             submitted = st.form_submit_button("Auf GitHub anlegen")
+
         if submitted:
             if not name.strip():
                 st.error("Bitte einen Eventnamen eingeben.")
             else:
                 try:
-                    event = db.create_event(name=name,
+                    duplicates = db.find_events_by_name(name)
+                    if duplicates:
+                        st.warning(
+                            f"Es existieren bereits {len(duplicates)} Event(s) "
+                            f"mit dem Namen „{name}“. Das neue Event wird trotzdem "
+                            "mit eigener UUID angelegt."
+                        )
+                    event = db.create_event(
+                        name=name,
                         event_date="" if event_date is None else event_date.isoformat(),
-                        location=location, sport=sport,
-                        tags=[x.strip() for x in tags.split(",") if x.strip()], notes=notes,
-                        settings=dict(st.session_state.config) if save_settings else {})
+                        location=location,
+                        sport=sport,
+                        tags=[tag.strip() for tag in tags_text.split(",") if tag.strip()],
+                        notes=notes,
+                        settings=dict(st.session_state.config) if save_current_settings else {},
+                    )
+                    st.session_state.github_database_selected_event = event["id"]
                     st.success(f"Event „{event['name']}“ wurde angelegt.")
                     st.rerun()
                 except GitHubDatabaseError as exc:
                     st.error(str(exc))
 
+    with tabs[2]:
+        selected_id = st.session_state.get("github_database_selected_event")
+        if not selected_id:
+            st.info("Zuerst im Tab „Events“ ein Event auswählen.")
+        else:
+            try:
+                event = db.load_event(selected_id)
+            except GitHubDatabaseError as exc:
+                st.error(str(exc))
+                event = None
+
+            if event:
+                with st.form(f"github_edit_event_{selected_id}"):
+                    name = st.text_input("Name", value=event.get("name", ""))
+                    current_date = None
+                    if event.get("date"):
+                        try:
+                            current_date = datetime.fromisoformat(event["date"]).date()
+                        except Exception:
+                            current_date = None
+                    event_date = st.date_input("Datum", value=current_date)
+                    location = st.text_input("Ort", value=event.get("location", ""))
+                    sports = ["Triathlon", "Radrennen", "Training", "Strecke", "Sonstiges"]
+                    current_sport = event.get("sport", "Triathlon")
+                    sport_index = sports.index(current_sport) if current_sport in sports else 0
+                    sport = st.selectbox("Typ", sports, index=sport_index)
+                    tags_text = st.text_input(
+                        "Tags",
+                        value=", ".join(event.get("tags", [])),
+                    )
+                    notes = st.text_area("Notizen", value=event.get("notes", ""))
+                    update_settings = st.checkbox(
+                        "Aktuelle Einstellungen als settings.json übernehmen",
+                        value=False,
+                    )
+                    save_changes = st.form_submit_button("Änderungen speichern")
+
+                if save_changes:
+                    try:
+                        db.update_event(
+                            selected_id,
+                            name=name,
+                            event_date="" if event_date is None else event_date.isoformat(),
+                            location=location,
+                            sport=sport,
+                            tags=[tag.strip() for tag in tags_text.split(",") if tag.strip()],
+                            notes=notes,
+                            settings=dict(st.session_state.config) if update_settings else None,
+                        )
+                        st.success("Event wurde aktualisiert.")
+                        st.rerun()
+                    except GitHubDatabaseError as exc:
+                        st.error(str(exc))
+
+                st.markdown("**Event duplizieren**")
+                duplicate_name = st.text_input(
+                    "Name der Kopie",
+                    value=f"{event.get('name', 'Event')} (Kopie)",
+                    key=f"github_duplicate_name_{selected_id}",
+                )
+                if st.button(
+                    "Event duplizieren",
+                    key=f"github_duplicate_{selected_id}",
+                    use_container_width=True,
+                ):
+                    try:
+                        copied = db.duplicate_event(selected_id, duplicate_name)
+                        st.session_state.github_database_selected_event = copied["id"]
+                        st.success(f"Event wurde als „{copied['name']}“ dupliziert.")
+                        st.rerun()
+                    except GitHubDatabaseError as exc:
+                        st.error(str(exc))
+
+                st.markdown("**Event löschen**")
+                confirm_delete = st.checkbox(
+                    f"Ich möchte „{event.get('name')}“ endgültig löschen.",
+                    key=f"github_confirm_delete_{selected_id}",
+                )
+                if st.button(
+                    "Event endgültig löschen",
+                    key=f"github_delete_{selected_id}",
+                    type="secondary",
+                    disabled=not confirm_delete,
+                    use_container_width=True,
+                ):
+                    try:
+                        db.delete_event(selected_id)
+                        st.session_state.github_database_selected_event = None
+                        st.success("Event wurde gelöscht.")
+                        st.rerun()
+                    except GitHubDatabaseError as exc:
+                        st.error(str(exc))
+
+    with tabs[3]:
+        selected_id = st.session_state.get("github_database_selected_event")
+        if not selected_id:
+            st.info("Zuerst im Tab „Events“ ein Event auswählen.")
+        else:
+            try:
+                files = db.list_event_files(selected_id)
+            except GitHubDatabaseError as exc:
+                st.error(str(exc))
+                files = []
+
+            uploads = st.file_uploader(
+                "JSON-, GPX-, FIT- oder CSV-Dateien hochladen",
+                type=["json", "gpx", "fit", "csv"],
+                accept_multiple_files=True,
+                key=f"github_event_upload_{selected_id}",
+            )
+            if uploads and st.button(
+                "Dateien auf GitHub speichern",
+                key=f"github_save_files_{selected_id}",
+                use_container_width=True,
+            ):
+                try:
+                    for uploaded in uploads:
+                        db.save_event_file(
+                            selected_id,
+                            uploaded.name,
+                            uploaded.getvalue(),
+                            f"Save {uploaded.name} for event {selected_id}",
+                        )
+                    st.success(f"{len(uploads)} Datei(en) gespeichert.")
+                    st.rerun()
+                except GitHubDatabaseError as exc:
+                    st.error(str(exc))
+
+            if not files:
+                st.info("Noch keine Dateien im Event vorhanden.")
+            else:
+                file_df = pd.DataFrame(files)
+                file_df["size_kb"] = file_df["size"].fillna(0) / 1024
+                st.dataframe(
+                    file_df[["name", "size_kb"]].rename(
+                        columns={"name": "Datei", "size_kb": "Größe [KB]"}
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                selected_file = st.selectbox(
+                    "Datei auswählen",
+                    [item["name"] for item in files],
+                    key=f"github_event_file_select_{selected_id}",
+                )
+                suffix = Path(selected_file).suffix.lower()
+                content = None
+                try:
+                    content = db.load_event_file(selected_id, selected_file)
+                except GitHubDatabaseError as exc:
+                    st.error(str(exc))
+
+                if content is not None:
+                    st.download_button(
+                        "Datei herunterladen",
+                        data=content,
+                        file_name=selected_file,
+                        mime="application/octet-stream",
+                        use_container_width=True,
+                    )
+
+                    action_cols = st.columns(2)
+                    if suffix == ".json":
+                        if action_cols[0].button(
+                            "Als Einstellungen laden",
+                            key=f"github_load_json_file_{selected_id}",
+                            use_container_width=True,
+                        ):
+                            try:
+                                loaded = json.loads(content.decode("utf-8"))
+                                loaded_config = normalize_loaded_config(loaded)
+                                st.session_state.config = loaded_config
+                                sync_widgets_from_config(loaded_config)
+                                st.success("JSON wurde als Einstellungen geladen.")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"JSON konnte nicht geladen werden: {exc}")
+                    elif suffix in {".gpx", ".fit", ".csv"}:
+                        if action_cols[0].button(
+                            "In App laden",
+                            key=f"github_load_data_file_{selected_id}",
+                            use_container_width=True,
+                        ):
+                            runtime_dir = Path("runtime_uploads")
+                            runtime_dir.mkdir(parents=True, exist_ok=True)
+                            target = runtime_dir / Path(selected_file).name
+                            target.write_bytes(content)
+
+                            config = dict(st.session_state.config)
+                            if suffix in {".gpx", ".fit"}:
+                                config["GPX/FIT Datei"] = str(target)
+                            elif suffix == ".csv":
+                                config["Wetterdatei Advanced Weather"] = str(target)
+
+                            st.session_state.config = normalize_loaded_config(config)
+                            sync_widgets_from_config(st.session_state.config)
+                            st.success(f"{selected_file} wurde in die App geladen.")
+                            st.rerun()
+
+                    if action_cols[1].button(
+                        "Datei löschen",
+                        key=f"github_delete_file_{selected_id}",
+                        use_container_width=True,
+                    ):
+                        try:
+                            db.delete_file(
+                                db._event_path(selected_id, selected_file),
+                                f"Delete {selected_file} from event {selected_id}",
+                            )
+                            st.success(f"{selected_file} wurde gelöscht.")
+                            st.rerun()
+                        except GitHubDatabaseError as exc:
+                            st.error(str(exc))
 
 def main() -> None:
     init_session_state()

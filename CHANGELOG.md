@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.1.0
+- Vollständige GitHub-Eventverwaltung
+- Doppelte Eventnamen werden erkannt und angezeigt
+- Event-Metadaten bearbeiten und umbenennen
+- Aktuelle settings.json eines Events aktualisieren
+- Events inklusive Dateien duplizieren
+- Events mit Sicherheitsabfrage löschen
+- JSON-, GPX-, FIT- und CSV-Dateien hochladen
+- Dateien herunterladen, in die App laden und löschen
+- UUID bleibt bei Umbenennung stabil
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.0.0
 - GitHub-Datenbank-Grundlage
 - GitHubDatabase-Klasse und Streamlit-Secrets
