@@ -74,7 +74,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.1.1"
+APP_VERSION = "3.1.2"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -2117,9 +2117,16 @@ root_path = "Database"
                     for upload_index, uploaded in enumerate(uploads, start=1):
                         content = uploaded.getvalue()
                         size_mb = len(content) / (1024 * 1024)
+                        suffix = Path(uploaded.name).suffix.lower()
+                        upload_mode = (
+                            "Git-Blob"
+                            if suffix in {".fit", ".gpx"} or len(content) >= 750 * 1024
+                            else "Contents API"
+                        )
                         upload_status.info(
                             f"Lade {uploaded.name} hoch "
-                            f"({size_mb:.2f} MB, Datei {upload_index}/{len(uploads)}) …"
+                            f"({size_mb:.2f} MB, {upload_mode}, "
+                            f"Datei {upload_index}/{len(uploads)}) …"
                         )
                         db.save_event_file(
                             selected_id,

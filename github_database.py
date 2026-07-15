@@ -304,9 +304,13 @@ class GitHubDatabase:
         path = self._event_path(event_id, safe_name)
         commit_message = message or f"Save {safe_name} for event {event_id}"
 
-        # The repository contents endpoint is convenient for small text files.
-        # Larger binary files use Git blobs/trees/commits instead.
-        if len(content) >= 750 * 1024:
+        # Binary FIT/GPX files always use Git blobs/trees/commits.
+        # This avoids invalid-request errors from the Contents API even when
+        # the binary file itself is smaller than the size threshold.
+        suffix = safe_name.lower().rsplit(".", 1)[-1] if "." in safe_name else ""
+        use_git_data_api = suffix in {"fit", "gpx"} or len(content) >= 750 * 1024
+
+        if use_git_data_api:
             self.put_file_via_git_data(
                 path=path,
                 content=content,

@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.2
+- FIT- und GPX-Dateien verwenden immer die Git-Blob/Tree/Commit-API
+- Dateigröße spielt für FIT/GPX keine Rolle mehr
+- Uploadstatus zeigt den tatsächlich verwendeten Uploadweg
+- Kleine JSON-/CSV-Dateien nutzen weiterhin die Contents-API
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.1.1
 - Robuster Upload größerer FIT-/GPX-Dateien über Git-Blobs, Trees und Commits
 - Kleine JSON-/CSV-Dateien nutzen weiterhin die Contents-API
