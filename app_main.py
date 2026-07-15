@@ -74,7 +74,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.1.5"
+APP_VERSION = "3.1.6"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -2119,18 +2119,13 @@ root_path = "Database"
                         size_mb = len(content) / (1024 * 1024)
                         suffix = Path(uploaded.name).suffix.lower()
                         upload_mode = (
-                            "mehrteiliger Upload"
-                            if suffix in {".fit", ".gpx"} or len(content) > 48 * 1024
-                            else "direkter Upload"
-                        )
-                        estimated_parts = max(
-                            1,
-                            (len(content) + (48 * 1024) - 1) // (48 * 1024),
+                            "Git Commit/Push"
+                            if suffix in {".fit", ".gpx"} or len(content) > 1024 * 1024
+                            else "REST-Upload"
                         )
                         upload_status.info(
                             f"Lade {uploaded.name} hoch "
                             f"({size_mb:.2f} MB, {upload_mode}, "
-                            f"ca. {estimated_parts} Teile, "
                             f"Datei {upload_index}/{len(uploads)}) …"
                         )
                         db.save_event_file(

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import shutil
+import subprocess
+import tempfile
 import hashlib
 import uuid
 from dataclasses import dataclass
@@ -335,6 +339,144 @@ class GitHubDatabase:
         }
 
 
+
+    def _git_auth_environment(self) -> dict[str, str]:
+        """Creates Git HTTP authentication without embedding the token in the URL."""
+        credentials = base64.b64encode(
+            f"x-access-token:{self.config.token}".encode("utf-8")
+        ).decode("ascii")
+
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "http.extraHeader",
+                "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {credentials}",
+            }
+        )
+        return environment
+
+    def _run_git(
+        self,
+        args: list[str],
+        *,
+        cwd: str | None = None,
+        timeout_s: int = 180,
+    ) -> subprocess.CompletedProcess:
+        try:
+            completed = subprocess.run(
+                ["git", *args],
+                cwd=cwd,
+                env=self._git_auth_environment(),
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise GitHubDatabaseError(
+                "Das Programm `git` ist in der Streamlit-Umgebung nicht verfügbar."
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise GitHubDatabaseError(
+                f"Git-Befehl wurde nach {timeout_s} Sekunden abgebrochen."
+            ) from exc
+
+        if completed.returncode != 0:
+            error_text = (completed.stderr or completed.stdout or "").strip()
+            # Defensive token redaction in case Git ever echoes credentials.
+            error_text = error_text.replace(self.config.token, "***")
+            raise GitHubDatabaseError(
+                f"Git-Befehl fehlgeschlagen: {' '.join(args[:2])}. "
+                f"{error_text[:1200]}"
+            )
+        return completed
+
+    def put_file_via_git_push(
+        self,
+        path: str,
+        content: bytes,
+        message: str,
+    ) -> None:
+        """Stores a binary file using a normal Git commit and HTTPS push."""
+        repository_url = (
+            f"https://github.com/{self.config.owner}/{self.config.repo}.git"
+        )
+
+        with tempfile.TemporaryDirectory(prefix="bike-power-git-") as temp_dir:
+            self._run_git(
+                [
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--branch",
+                    self.config.branch,
+                    repository_url,
+                    temp_dir,
+                ],
+                timeout_s=180,
+            )
+
+            target = Path(temp_dir) / Path(path.strip("/"))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+
+            self._run_git(
+                ["config", "user.name", "Bike Power Calculator"],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                ["config", "user.email", "bike-power-calculator@users.noreply.github.com"],
+                cwd=temp_dir,
+            )
+            self._run_git(["add", "--", path.strip("/")], cwd=temp_dir)
+
+            status = self._run_git(
+                ["status", "--porcelain", "--", path.strip("/")],
+                cwd=temp_dir,
+            )
+            if not status.stdout.strip():
+                return
+
+            self._run_git(["commit", "-m", message], cwd=temp_dir)
+
+            # Rebase once to reduce the chance of conflicts when another API
+            # operation updated index.json shortly before this upload.
+            self._run_git(
+                ["pull", "--rebase", "origin", self.config.branch],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                ["push", "origin", f"HEAD:{self.config.branch}"],
+                cwd=temp_dir,
+                timeout_s=180,
+            )
+
+    def get_file_raw(self, path: str) -> bytes | None:
+        """Loads repository content using GitHub's raw media type."""
+        response = self.session.get(
+            self._contents_url(path),
+            params={"ref": self.config.branch},
+            headers={
+                "Accept": "application/vnd.github.raw+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            timeout=self.timeout_s,
+        )
+        if response.status_code == 404:
+            return None
+        if response.status_code >= 400:
+            try:
+                message = response.json().get("message", response.text)
+            except Exception:
+                message = response.text
+            raise GitHubDatabaseError(
+                f"GitHub API {response.status_code}: {message}"
+            )
+        return response.content
+
+
     CHUNK_SIZE_BYTES = 48 * 1024
 
     def _chunk_directory_path(self, event_id: str, filename: str) -> str:
@@ -469,26 +611,14 @@ class GitHubDatabase:
         commit_message = message or f"Save {safe_name} for event {event_id}"
         suffix = safe_name.lower().rsplit(".", 1)[-1] if "." in safe_name else ""
 
-        # FIT/GPX and larger files are split into small repository files.
-        # This avoids large Base64 JSON requests being rejected upstream.
-        use_chunked_storage = (
-            suffix in {"fit", "gpx"}
-            or len(content) > self.CHUNK_SIZE_BYTES
-        )
-        if use_chunked_storage:
-            self._save_chunked_file(
-                event_id,
-                safe_name,
-                content,
-                commit_message,
+        # Binary route/activity files use an actual Git commit and push. This
+        # avoids Base64 JSON requests through the Streamlit/GitHub REST path.
+        if suffix in {"fit", "gpx"} or len(content) > 1024 * 1024:
+            self.put_file_via_git_push(
+                path=path,
+                content=content,
+                message=commit_message,
             )
-            # Remove an earlier direct representation, if present.
-            direct = self.get_file(path)
-            if direct is not None:
-                self.delete_file(
-                    path,
-                    f"Replace direct file with chunked storage: {safe_name}",
-                )
             return
 
         existing = self.get_file(path)
@@ -498,15 +628,19 @@ class GitHubDatabase:
     def load_event_file(self, event_id: str, filename: str) -> bytes:
         safe_name = filename.split("/")[-1]
 
+        direct_content = self.get_file_raw(
+            self._event_path(event_id, safe_name)
+        )
+        if direct_content is not None:
+            return direct_content
+
+        # Backward compatibility for files written by versions 3.1.4/3.1.5.
         if self._is_chunked_file(event_id, safe_name):
             return self._load_chunked_file(event_id, safe_name)
 
-        loaded = self.get_file(self._event_path(event_id, safe_name))
-        if loaded is None:
-            raise GitHubDatabaseError(
-                f"Datei {safe_name} wurde im Event nicht gefunden."
-            )
-        return loaded[0]
+        raise GitHubDatabaseError(
+            f"Datei {safe_name} wurde im Event nicht gefunden."
+        )
 
     def list_event_files(self, event_id: str) -> list[dict[str, Any]]:
         path = f"{self.config.normalized_root}/Events/{event_id}"

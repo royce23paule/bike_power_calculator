@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.1.6
+- FIT/GPX-Upload vollständig von REST auf normalen Git-Commit/Push umgestellt
+- Token wird über einen temporären HTTP-Authorization-Header an Git übergeben
+- Token erscheint weder in Repository-URL noch in der Benutzeroberfläche
+- Binärdateien werden unverändert als einzelne Repository-Datei gespeichert
+- Laden größerer Dateien über GitHub Raw-Media-Type
+- Legacy-Unterstützung für frühere mehrteilige Dateien bleibt erhalten
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.1.5
 - Teilgröße für FIT/GPX von 384 KB auf 48 KB reduziert
 - Uploadstatus zeigt geschätzte Anzahl der Dateiteile
