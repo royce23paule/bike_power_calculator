@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.0.0
+- GitHub-Datenbank-Grundlage
+- GitHubDatabase-Klasse und Streamlit-Secrets
+- Verbindungstest und index.json-Initialisierung
+- Events mit UUID, event.json und vollständiger settings.json
+- Events suchen und Einstellungen laden
+- Lokale Datenbank bleibt als Fallback
+
+
 ## 2.13.2
 - Behoben: fehlender `datetime`-Import in der Event-Datenbank
 - Zeitstempel für Event-Metadaten funktionieren wieder

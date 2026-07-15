@@ -21,6 +21,7 @@ import pydeck as pdk
 from plotly.subplots import make_subplots
 
 import bike_power_calc as bpc
+from github_database import GitHubDatabase, GitHubDatabaseConfig, GitHubDatabaseError
 from defaults import FIELDS, GROUP_TITLES, defaults_dict, ordered_values
 import re
 from datetime import datetime
@@ -73,7 +74,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "2.13.2"
+APP_VERSION = "3.0.0"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -1806,6 +1807,103 @@ def render_database_sidebar() -> None:
                     st.rerun()
 
 
+
+def get_github_database_config() -> GitHubDatabaseConfig | None:
+    try:
+        section = st.secrets.get("github_database", {})
+    except Exception:
+        return None
+    token = str(section.get("token", "")).strip()
+    owner = str(section.get("owner", "")).strip()
+    repo = str(section.get("repo", "")).strip()
+    if not token or not owner or not repo:
+        return None
+    return GitHubDatabaseConfig(token=token, owner=owner, repo=repo,
+        branch=str(section.get("branch", "main")).strip() or "main",
+        root_path=str(section.get("root_path", "Database")).strip() or "Database")
+
+
+def get_github_database() -> GitHubDatabase | None:
+    config = get_github_database_config()
+    return None if config is None else GitHubDatabase(config)
+
+
+def render_github_database_sidebar() -> None:
+    db = get_github_database()
+    st.divider()
+    st.subheader("☁️ GitHub-Datenbank")
+    if db is None:
+        st.warning("GitHub-Datenbank ist noch nicht konfiguriert.")
+        example = "[github_database]\ntoken = \"github_pat_...\"\nowner = \"DEIN_GITHUB_NAME\"\nrepo = \"bike-power-database\"\nbranch = \"main\"\nroot_path = \"Database\""
+        st.code(example, language="toml")
+        st.caption("Auf Streamlit Cloud unter Manage app → Settings → Secrets eintragen.")
+        return
+    st.caption(f"{db.config.owner}/{db.config.repo} · Branch {db.config.branch}")
+    c1, c2 = st.columns(2)
+    if c1.button("Verbindung testen", key="github_db_test", use_container_width=True):
+        try:
+            info = db.test_connection()
+            visibility = "privat" if info.get("private") else "öffentlich"
+            st.success(f"Verbunden mit {info.get('full_name')} · {visibility}")
+        except GitHubDatabaseError as exc:
+            st.error(str(exc))
+    if c2.button("Initialisieren", key="github_db_init", use_container_width=True):
+        try:
+            db.initialize()
+            st.success("Database/index.json ist vorhanden.")
+            st.rerun()
+        except GitHubDatabaseError as exc:
+            st.error(str(exc))
+    try:
+        events = db.list_events()
+    except GitHubDatabaseError as exc:
+        st.error(str(exc))
+        return
+    search = st.text_input("GitHub-Events suchen", key="github_db_search").strip().lower()
+    events = [e for e in events if not search or search in " ".join([
+        str(e.get("name", "")), str(e.get("date", "")), str(e.get("location", "")),
+        " ".join(e.get("tags", []))]).lower()]
+    if events:
+        labels = {f"{e.get('name', e.get('id'))} · {e.get('date') or 'ohne Datum'}": e.get('id') for e in events}
+        label = st.selectbox("GitHub-Event auswählen", list(labels), key="github_db_event")
+        event_id = labels[label]
+        if st.button("Einstellungen laden", key="github_db_load", use_container_width=True):
+            try:
+                cfg = normalize_loaded_config(db.load_settings(event_id))
+                st.session_state.config = cfg
+                sync_widgets_from_config(cfg)
+                st.success("settings.json geladen.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Laden fehlgeschlagen: {exc}")
+    else:
+        st.info("Noch keine GitHub-Events vorhanden.")
+    with st.expander("Neues GitHub-Event", expanded=False):
+        with st.form("github_db_new_event"):
+            name = st.text_input("Eventname")
+            event_date = st.date_input("Eventdatum", value=None)
+            location = st.text_input("Ort")
+            sport = st.selectbox("Eventtyp", ["Triathlon", "Radrennen", "Training", "Strecke", "Sonstiges"])
+            tags = st.text_input("Tags, durch Kommas getrennt")
+            notes = st.text_area("Notizen")
+            save_settings = st.checkbox("Aktuelle Einstellungen als settings.json speichern", value=True)
+            submitted = st.form_submit_button("Auf GitHub anlegen")
+        if submitted:
+            if not name.strip():
+                st.error("Bitte einen Eventnamen eingeben.")
+            else:
+                try:
+                    event = db.create_event(name=name,
+                        event_date="" if event_date is None else event_date.isoformat(),
+                        location=location, sport=sport,
+                        tags=[x.strip() for x in tags.split(",") if x.strip()], notes=notes,
+                        settings=dict(st.session_state.config) if save_settings else {})
+                    st.success(f"Event „{event['name']}“ wurde angelegt.")
+                    st.rerun()
+                except GitHubDatabaseError as exc:
+                    st.error(str(exc))
+
+
 def main() -> None:
     init_session_state()
 
@@ -1850,6 +1948,7 @@ def main() -> None:
         )
         st.caption(f"Version {APP_VERSION} · Build {BUILD_DATE}")
         render_database_sidebar()
+        render_github_database_sidebar()
 
     config = st.session_state.config.copy()
 
