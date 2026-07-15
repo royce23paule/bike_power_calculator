@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
+from pathlib import Path
 
 
 class GitHubDatabaseError(RuntimeError):

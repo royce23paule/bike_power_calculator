@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.7
+- Behoben: fehlender `Path`-Import im Git-Commit/Push-Dateiweg
+- Git-CLI-Abhängigkeiten statisch geprüft
+- JSON-Upload bleibt unverändert
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.1.6
 - FIT/GPX-Upload vollständig von REST auf normalen Git-Commit/Push umgestellt
 - Token wird über einen temporären HTTP-Authorization-Header an Git übergeben
