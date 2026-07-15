@@ -211,6 +211,45 @@ class GitHubDatabase:
         return payload if isinstance(payload, list) else []
 
 
+
+    def _request_git_stage(
+        self,
+        stage: str,
+        method: str,
+        url: str,
+        **kwargs,
+    ):
+        """Git request with stage-specific diagnostics and safe error output."""
+        try:
+            response = self.session.request(
+                method,
+                url,
+                timeout=self.timeout_s,
+                **kwargs,
+            )
+        except requests.RequestException as exc:
+            raise GitHubDatabaseError(
+                f"Git-Upload fehlgeschlagen bei „{stage}“: "
+                f"GitHub ist nicht erreichbar: {exc}"
+            ) from exc
+
+        if response.status_code >= 400:
+            content_type = response.headers.get("content-type", "unbekannt")
+            request_id = response.headers.get("x-github-request-id", "—")
+            try:
+                parsed = response.json()
+                message = parsed.get("message", str(parsed))
+            except Exception:
+                text = response.text.strip().replace("\n", " ")
+                message = text[:500] if text else "Leere Antwort"
+
+            raise GitHubDatabaseError(
+                f"Git-Upload fehlgeschlagen bei „{stage}“. "
+                f"HTTP {response.status_code}; Content-Type: {content_type}; "
+                f"GitHub Request-ID: {request_id}; Antwort: {message}"
+            )
+        return response
+
     def _git_url(self, suffix: str) -> str:
         return f"{self._repo_url()}/git/{suffix.lstrip('/')}"
 
@@ -234,24 +273,23 @@ class GitHubDatabase:
         content: bytes,
         message: str,
     ) -> dict[str, Any]:
-        """Writes a file by creating a blob, tree and commit.
-
-        This is more robust than the repository contents endpoint for larger
-        binary FIT/GPX files because the file is written as a raw Git object.
-        """
+        """Writes a file through Git blobs, trees, commits and references."""
         commit_sha, base_tree_sha = self._get_branch_commit_and_tree()
 
-        blob_response = self._request(
+        blob_payload = {
+            "content": base64.b64encode(content).decode("ascii"),
+            "encoding": "base64",
+        }
+        blob_response = self._request_git_stage(
+            "Blob erzeugen",
             "POST",
             self._git_url("blobs"),
-            json={
-                "content": base64.b64encode(content).decode("ascii"),
-                "encoding": "base64",
-            },
+            json=blob_payload,
         )
         blob_sha = blob_response.json()["sha"]
 
-        tree_response = self._request(
+        tree_response = self._request_git_stage(
+            "Tree erzeugen",
             "POST",
             self._git_url("trees"),
             json={
@@ -268,7 +306,8 @@ class GitHubDatabase:
         )
         new_tree_sha = tree_response.json()["sha"]
 
-        commit_response = self._request(
+        commit_response = self._request_git_stage(
+            "Commit erzeugen",
             "POST",
             self._git_url("commits"),
             json={
@@ -279,7 +318,8 @@ class GitHubDatabase:
         )
         new_commit_sha = commit_response.json()["sha"]
 
-        ref_response = self._request(
+        ref_response = self._request_git_stage(
+            "Branch aktualisieren",
             "PATCH",
             self._git_url(f"refs/heads/{quote(self.config.branch, safe='')}"),
             json={

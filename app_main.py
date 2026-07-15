@@ -74,7 +74,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.1.2"
+APP_VERSION = "3.1.3"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -2139,6 +2139,10 @@ root_path = "Database"
                     st.rerun()
                 except GitHubDatabaseError as exc:
                     st.error(str(exc))
+                    st.caption(
+                        "Bitte die angezeigte Stufe und die GitHub Request-ID "
+                        "für die Fehleranalyse kopieren."
+                    )
 
             if not files:
                 st.info("Noch keine Dateien im Event vorhanden.")

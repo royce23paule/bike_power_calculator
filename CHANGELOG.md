@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.1.3
+- Stufengenaue Diagnose für Git-Blob-Uploads
+- Fehler unterscheiden Blob, Tree, Commit und Branch-Update
+- Anzeige von HTTP-Status, Content-Type und GitHub Request-ID
+- Token und Authorization-Header werden nicht ausgegeben
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.1.2
 - FIT- und GPX-Dateien verwenden immer die Git-Blob/Tree/Commit-API
 - Dateigröße spielt für FIT/GPX keine Rolle mehr
