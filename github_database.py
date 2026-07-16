@@ -1250,21 +1250,48 @@ class GitHubDatabase:
 
     def delete_event(self, event_id: str) -> None:
         event = self.load_event(event_id)
-        path = f"{self.config.normalized_root}/Events/{event_id}"
-        items = self.list_directory(path)
+        repository_url = (
+            f"https://github.com/{self.config.owner}/{self.config.repo}.git"
+        )
+        event_root = Path(self.config.normalized_root) / "Events" / event_id
 
-        # Files must be deleted one by one through GitHub Contents API.
-        for item in items:
-            if item.get("type") == "file":
-                self.delete_file(
-                    item["path"],
-                    f"Delete {item.get('name')} from event {event.get('name')}",
+        with tempfile.TemporaryDirectory(prefix="bike-power-delete-event-") as temp_dir:
+            self._run_git(
+                ["clone", "--depth", "1", "--branch", self.config.branch,
+                 repository_url, temp_dir],
+                timeout_s=180,
+            )
+            target = Path(temp_dir) / event_root
+            if not target.exists():
+                raise GitHubDatabaseError(
+                    f"Eventverzeichnis {event_id} wurde nicht gefunden."
                 )
+
+            shutil.rmtree(target)
+
+            self._run_git(["config", "user.name", "Bike Power Calculator"], cwd=temp_dir)
+            self._run_git(
+                ["config", "user.email",
+                 "bike-power-calculator@users.noreply.github.com"],
+                cwd=temp_dir,
+            )
+            self._run_git(["add", "-A", "--", event_root.as_posix()], cwd=temp_dir)
+            status = self._run_git(
+                ["status", "--porcelain", "--", event_root.as_posix()],
+                cwd=temp_dir,
+            )
+            if status.stdout.strip():
+                self._run_git(
+                    ["commit", "-m",
+                     f"Delete event: {event.get('name', event_id)}"],
+                    cwd=temp_dir,
+                )
+                self._push_with_retry(temp_dir)
 
         index, index_sha = self.load_index()
         index["events"] = [
-            entry for entry in index.get("events", [])
-            if entry.get("id") != event_id
+            item for item in index.get("events", [])
+            if item.get("id") != event_id
         ]
         index["updated_at"] = datetime.now(timezone.utc).isoformat()
         self.put_json(
@@ -1273,6 +1300,7 @@ class GitHubDatabase:
             f"Update database index: delete {event.get('name')}",
             index_sha,
         )
+
 
     def duplicate_event(
         self,

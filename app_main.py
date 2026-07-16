@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.6.0"
+APP_VERSION = "3.6.1"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -1187,7 +1187,7 @@ def pdf_viewer(pdf_path: Path, max_pages: int = 12) -> None:
             "Die vollständige PDF steht oben als Download bereit."
         )
 
-        zoom = st.slider("PDF-Vorschau Zoom", 1.0, 3.0, 1.6, 0.1)
+        zoom = st.slider("PDF-Vorschau Zoom", 1.0, 4.0, 2.5, 0.1)
         matrix = fitz.Matrix(zoom, zoom)
 
         for page_number in range(pages_to_show):
@@ -1391,6 +1391,7 @@ def render_save_calculation_to_github(
                         weather_content=weather_content,
                         weather_filename=weather_filename,
                     )
+                refresh_github_repository_statistics(db)
                 st.success(
                     f"Berechnung „{metadata['name']}“ wurde gespeichert."
                 )
@@ -1735,6 +1736,13 @@ def get_github_database() -> GitHubDatabase | None:
 
 
 
+def refresh_github_repository_statistics(db) -> None:
+    try:
+        st.session_state.github_repository_statistics = db.repository_statistics()
+    except GitHubDatabaseError:
+        st.session_state.pop("github_repository_statistics", None)
+
+
 def render_github_database_sidebar() -> None:
     db = get_github_database()
 
@@ -1919,6 +1927,7 @@ root_path = "Database"
                         settings=None,
                     )
                     st.session_state.github_database_selected_event = event["id"]
+                    refresh_github_repository_statistics(db)
                     st.success(f"Event „{event['name']}“ wurde angelegt.")
                     st.rerun()
                 except GitHubDatabaseError as exc:
@@ -1994,8 +2003,21 @@ root_path = "Database"
                         st.error(str(exc))
 
                 st.markdown("**Event löschen**")
+                try:
+                    delete_files = db.list_event_files(selected_id)
+                    delete_calculations = db.list_calculations(selected_id)
+                except GitHubDatabaseError:
+                    delete_files = []
+                    delete_calculations = []
+
+                st.warning(
+                    f"Beim Löschen von „{event.get('name', selected_id)}“ werden "
+                    f"{len(delete_calculations)} Berechnung(en), "
+                    f"{len(delete_files)} sichtbare Event-Datei(en) sowie alle "
+                    f"zugehörigen PDF-, HTML-, Wetter- und Systemdateien dauerhaft entfernt."
+                )
                 confirm_delete = st.checkbox(
-                    f"Ich möchte „{event.get('name')}“ endgültig löschen.",
+                    "Ich bestätige die vollständige und dauerhafte Löschung",
                     key=f"github_confirm_delete_{selected_id}",
                 )
                 if st.button(
@@ -2006,9 +2028,15 @@ root_path = "Database"
                     use_container_width=True,
                 ):
                     try:
-                        db.delete_event(selected_id)
+                        with st.spinner(
+                            "Event und alle zugehörigen Daten werden gelöscht …"
+                        ):
+                            db.delete_event(selected_id)
                         st.session_state.github_database_selected_event = None
-                        st.success("Event wurde gelöscht.")
+                        refresh_github_repository_statistics(db)
+                        st.success(
+                            "Event einschließlich aller Berechnungen wurde gelöscht."
+                        )
                         st.rerun()
                     except GitHubDatabaseError as exc:
                         st.error(str(exc))
@@ -2504,6 +2532,7 @@ root_path = "Database"
                                 selected_id,
                                 calculation_id,
                             )
+                        refresh_github_repository_statistics(db)
                         st.success("Berechnung wurde dauerhaft gelöscht.")
                         st.rerun()
                     except GitHubDatabaseError as exc:
@@ -2560,6 +2589,7 @@ root_path = "Database"
                             )
                         st.session_state.github_database_selected_event = imported["id"]
                         st.session_state.pop("github_repository_statistics", None)
+                        refresh_github_repository_statistics(db)
                         st.success(f"Event „{imported['name']}“ wurde importiert.")
                         st.rerun()
                     except GitHubDatabaseError as exc:

@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.6.1
+- Event-Löschung entfernt rekursiv das vollständige Eventverzeichnis
+- Alle Berechnungen, PDF-, HTML-, Wetter-, Eingabe- und versteckten Dateien werden mitgelöscht
+- index.json wird erst nach erfolgreicher vollständiger Löschung aktualisiert
+- Verbesserter Löschdialog mit Eventname sowie Anzahl der Berechnungen und Dateien
+- PDF-Vorschau startet standardmäßig mit Zoom 2,5
+- Zoom-Bereich der PDF-Vorschau auf 1,0 bis 4,0 erweitert
+- Repository-Statistik wird nach wichtigen Datenbankänderungen automatisch aktualisiert
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.6.0
 - Event-ZIP-Backups können als neues Event mit neuer UUID importiert werden
 - ZIP-Struktur und Pfade werden vor dem Import validiert
