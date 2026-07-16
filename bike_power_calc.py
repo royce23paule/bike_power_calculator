@@ -77,6 +77,14 @@ _weather_fast_cache_hits = 0
 _weather_fast_cache_misses = 0
 _weather_exact_cache = {}
 
+# Reproduzierbarer Snapshot aller während eines Rechenlaufs verwendeten
+# Open-Meteo-Antworten. Bei einer JSON-Wetterdatei werden diese Daten offline
+# wiederverwendet und es findet kein API-Aufruf statt.
+_weather_snapshot_requests = []
+_weather_snapshot_lookup = {}
+_weather_snapshot_offline = False
+_weather_snapshot_source_path = None
+
 
 # FIT-Parsing-Cache. Der Cache-Schlüssel basiert auf dem Dateiinhalt sowie
 # Start-/Enddistanz. Dadurch werden identische FIT-Dateien nur einmal geparst.
@@ -285,6 +293,73 @@ def calc_rho_advanced(time):
     AdvWeather_AirDensity.append(rho)
     return rho
 
+# def _weather_request_key(latitude, longitude, start_time):
+    date_value = datetime.datetime.strptime(start_time, '%Y-%m-%dT%H:%M').date().isoformat()
+    return f"{float(latitude):.5f}|{float(longitude):.5f}|{date_value}"
+
+
+def _hourly_data_to_snapshot(latitude, longitude, start_time, source_url):
+    return {
+        'key': _weather_request_key(latitude, longitude, start_time),
+        'latitude': float(latitude),
+        'longitude': float(longitude),
+        'requested_start_time': str(start_time),
+        'source_url': source_url,
+        'date': [pd.Timestamp(value).isoformat() for value in hourly_data['date']],
+        'temperature_2m': np.asarray(hourly_data['temperature_2m'], dtype=float).tolist(),
+        'relative_humidity_2m': np.asarray(hourly_data['relative_humidity_2m'], dtype=float).tolist(),
+        'apparent_temperature': np.asarray(hourly_data['apparent_temperature'], dtype=float).tolist(),
+        'precipitation': np.asarray(hourly_data['precipitation'], dtype=float).tolist(),
+        'surface_pressure': np.asarray(hourly_data['surface_pressure'], dtype=float).tolist(),
+        'wind_speed_10m': np.asarray(hourly_data['wind_speed_10m'], dtype=float).tolist(),
+        'wind_direction_10m': np.asarray(hourly_data['wind_direction_10m'], dtype=float).tolist(),
+        'wind_gusts_10m': np.asarray(hourly_data['wind_gusts_10m'], dtype=float).tolist(),
+    }
+
+
+def _snapshot_to_hourly_data(snapshot):
+    return {
+        'date': pd.DatetimeIndex(pd.to_datetime(snapshot['date'])),
+        'temperature_2m': np.asarray(snapshot['temperature_2m'], dtype=float),
+        'relative_humidity_2m': np.asarray(snapshot['relative_humidity_2m'], dtype=float),
+        'apparent_temperature': np.asarray(snapshot['apparent_temperature'], dtype=float),
+        'precipitation': np.asarray(snapshot['precipitation'], dtype=float),
+        'surface_pressure': np.asarray(snapshot['surface_pressure'], dtype=float),
+        'wind_speed_10m': np.asarray(snapshot['wind_speed_10m'], dtype=float),
+        'wind_direction_10m': np.asarray(snapshot['wind_direction_10m'], dtype=float),
+        'wind_gusts_10m': np.asarray(snapshot['wind_gusts_10m'], dtype=float),
+    }
+
+
+def load_weather_snapshot(path):
+    global _weather_snapshot_requests, _weather_snapshot_lookup
+    global _weather_snapshot_offline, _weather_snapshot_source_path
+    payload = json.loads(Path(path).read_text(encoding='utf-8-sig'))
+    if payload.get('schema') != 'bike_power_weather_snapshot':
+        raise ValueError('Die JSON-Datei ist kein Bike-Power-Online-Wetter-Snapshot.')
+    requests_data = payload.get('requests') or []
+    if not requests_data:
+        raise ValueError('Der Online-Wetter-Snapshot enthält keine Wetterdatensätze.')
+    _weather_snapshot_requests = requests_data
+    _weather_snapshot_lookup = {item['key']: item for item in requests_data}
+    _weather_snapshot_offline = True
+    _weather_snapshot_source_path = str(path)
+
+
+def get_weather_snapshot():
+    if not _weather_snapshot_requests:
+        return None
+    return {
+        'schema': 'bike_power_weather_snapshot',
+        'schema_version': 1,
+        'provider': 'Open-Meteo',
+        'created_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        'offline_replay': bool(_weather_snapshot_offline),
+        'source_file': _weather_snapshot_source_path,
+        'requests': _weather_snapshot_requests,
+    }
+
+
 # def Get_API_Data(latitude,longitude,StratTime):
 #     global API_Data
 #     hourly = Hourly()
@@ -299,6 +374,19 @@ def calc_rho_advanced(time):
 
 def Get_API_Data(latitude,longitude,StratTime):
     global hourly_data, API_Cache_Hits, API_Cache_Misses, API_Request_Count
+    global _weather_snapshot_requests, _weather_snapshot_lookup
+    request_key = _weather_request_key(latitude, longitude, StratTime)
+    if _weather_snapshot_offline:
+        snapshot = _weather_snapshot_lookup.get(request_key)
+        if snapshot is None:
+            raise ValueError(
+                'Im geladenen Online-Wetter-Snapshot fehlen Daten für '
+                f'{float(latitude):.5f}, {float(longitude):.5f} am {StratTime[:10]}.'
+            )
+        hourly_data = _snapshot_to_hourly_data(snapshot)
+        API_Cache_Hits += 1
+        _prepare_fast_weather_arrays()
+        return
     # Ein Client und ein persistenter Cache werden für alle Abfragen wiederverwendet.
     cache_session = _get_weather_cache_session()
     openmeteo = _get_openmeteo_client()
@@ -366,6 +454,10 @@ def Get_API_Data(latitude,longitude,StratTime):
     hourly_data["wind_speed_10m"] = hourly_wind_speed_10m
     hourly_data["wind_direction_10m"] = hourly_wind_direction_10m
     hourly_data["wind_gusts_10m"] = hourly_wind_gusts_10m
+    snapshot = _hourly_data_to_snapshot(latitude, longitude, StratTime, url)
+    if snapshot['key'] not in _weather_snapshot_lookup:
+        _weather_snapshot_requests.append(snapshot)
+        _weather_snapshot_lookup[snapshot['key']] = snapshot
     _prepare_fast_weather_arrays()
     # print('END Get_API_Data')
 
@@ -728,6 +820,8 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     global Winddamping,Wetterdatei,Use_AdvWeather,API_Weather,API_StratTime
     global v_ave_liste,pol_a0_init,lat2,lon2
     global API_Cache_Hits, API_Cache_Misses, API_Request_Count
+    global _weather_snapshot_requests, _weather_snapshot_lookup
+    global _weather_snapshot_offline, _weather_snapshot_source_path
     #get_ipython().run_line_magic('matplotlib', 'inline')
     _profile_steps = []
     _weather_start_offset_seconds = None
@@ -758,6 +852,13 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     API_Cache_Hits = 0
     API_Cache_Misses = 0
     API_Request_Count = 0
+    _weather_snapshot_requests = []
+    _weather_snapshot_lookup = {}
+    _weather_snapshot_offline = False
+    _weather_snapshot_source_path = None
+    if Use_AdvWeather_ and str(Wetterdatei_).lower().endswith('.json'):
+        load_weather_snapshot(Wetterdatei_)
+        API_Weather_ = True
     m_r = m_r_
     m_b = m_b_
     m_sys = m_r_ + m_b_
@@ -880,6 +981,11 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'normalized_power_w': float(NP) if 'NP' in globals() and NP is not None else None,
         'elevation_gain_m': float(el_gain_from_height(h)) if 'h' in globals() and len(h) > 0 else None,
         'weather_api_cache': get_weather_api_cache_info() if API_Weather else None,
+        'weather_snapshot': get_weather_snapshot() if API_Weather else None,
+        'weather_source_mode': (
+            'online_snapshot_json' if _weather_snapshot_offline
+            else ('online_api' if API_Weather else ('csv' if Use_AdvWeather else 'standard'))
+        ),
         'profile_steps': _profile_steps,
         'kernel_profile': _kernel_profile,
         'fit_cache_hit': FIT_Cache_Hit,

@@ -873,6 +873,8 @@ class GitHubDatabase:
         pdf_filename: str | None = None,
         html_content: bytes | None = None,
         html_filename: str | None = None,
+        weather_content: bytes | None = None,
+        weather_filename: str | None = None,
     ) -> dict[str, Any]:
         calculation_id = uuid.uuid4().hex[:10]
         now = datetime.now(timezone.utc).isoformat()
@@ -917,6 +919,9 @@ class GitHubDatabase:
             metadata["files"].append(pdf_filename)
         if html_content is not None and html_filename:
             metadata["files"].append(html_filename)
+        if weather_content is not None and weather_filename:
+            metadata["files"].append(weather_filename)
+            metadata["weather_file"] = weather_filename
 
         base_path = (
             f"{self.config.normalized_root}/Events/{event_id}/"
@@ -950,6 +955,8 @@ class GitHubDatabase:
             payloads.append((f"{base_path}/{pdf_filename}", pdf_content))
         if html_content is not None and html_filename:
             payloads.append((f"{base_path}/{html_filename}", html_content))
+        if weather_content is not None and weather_filename:
+            payloads.append((f"{base_path}/{weather_filename}", weather_content))
 
         # One clone/commit/push stores the complete calculation atomically.
         repository_url = (

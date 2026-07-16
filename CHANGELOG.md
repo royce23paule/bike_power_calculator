@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.4.0
+- Vollständige Open-Meteo-Antworten werden als reproduzierbarer JSON-Wetter-Snapshot erfasst
+- JSON-Wetter-Snapshots können über denselben Wetterdatei-Upload wie CSV geladen werden
+- Dateiendung steuert automatisch das Wettermodell: CSV vereinfacht, JSON vollständige Online-Daten
+- Geladene JSON-Snapshots arbeiten vollständig offline ohne erneuten API-Abruf
+- Wetter-Snapshot steht nach jeder Online-Berechnung als Download bereit
+- Wetter-Snapshot wird beim Speichern einer Berechnung automatisch separat archiviert
+- Alles laden stellt auch die gespeicherte Wetterdatei wieder her
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.3.1
 - Laden gespeicherter Berechnungsdateien auf GitHub Raw-Media-Abruf umgestellt
 - Behebt JSONDecodeError bei per Git-Commit/Push gespeicherten Dateien

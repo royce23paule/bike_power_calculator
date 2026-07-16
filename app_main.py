@@ -74,7 +74,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.3.1"
+APP_VERSION = "3.4.0"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -307,8 +307,13 @@ def call_bike_power_calc(config: dict[str, Any], generate_pdf: bool = True, gene
     if not Path(GPX_File).exists():
         raise FileNotFoundError(f"GPX/FIT-Datei nicht gefunden: {GPX_File}")
 
-    if Use_AdvWeather and not API_Weather and not Path(Wetterdatei).exists():
-        raise FileNotFoundError(f"Wetter-CSV nicht gefunden: {Wetterdatei}")
+    weather_suffix = Path(Wetterdatei).suffix.lower()
+    if Use_AdvWeather and weather_suffix == ".json":
+        API_Weather = True
+    if Use_AdvWeather and weather_suffix in {".csv", ".json"} and not Path(Wetterdatei).exists():
+        raise FileNotFoundError(f"Wetterdatei nicht gefunden: {Wetterdatei}")
+    if Use_AdvWeather and not API_Weather and weather_suffix != ".csv":
+        raise ValueError("Für das CSV-Wettermodell muss eine CSV-Datei ausgewählt sein.")
 
     return bpc.Run(
         title,
@@ -1337,6 +1342,17 @@ def render_save_calculation_to_github(
             pdf_filename = None
             html_content = None
             html_filename = None
+            weather_content = None
+            weather_filename = None
+
+            weather_snapshot = result.get("weather_snapshot")
+            if weather_snapshot:
+                weather_content = json.dumps(
+                    weather_snapshot,
+                    ensure_ascii=False,
+                    indent=2,
+                ).encode("utf-8")
+                weather_filename = "online_weather_snapshot.json"
 
             pdf_path_value = result.get("pdf_path")
             if include_pdf and pdf_path_value:
@@ -1371,6 +1387,8 @@ def render_save_calculation_to_github(
                         pdf_filename=pdf_filename,
                         html_content=html_content,
                         html_filename=html_filename,
+                        weather_content=weather_content,
+                        weather_filename=weather_filename,
                     )
                 st.success(
                     f"Berechnung „{metadata['name']}“ wurde gespeichert."
@@ -1415,6 +1433,23 @@ def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[st
     )
 
     render_save_calculation_to_github(result, run_log, profile)
+
+    weather_snapshot = result.get("weather_snapshot")
+    if weather_snapshot:
+        st.download_button(
+            "Online-Wetterdaten als JSON herunterladen",
+            data=json.dumps(weather_snapshot, ensure_ascii=False, indent=2).encode("utf-8"),
+            file_name=(
+                re.sub(r"[^A-Za-z0-9._-]+", "_", str(result.get("title", "weather"))).strip("_")
+                + "_online_weather.json"
+            ),
+            mime="application/json",
+            use_container_width=True,
+        )
+        st.caption(
+            f"Wetterquelle: {result.get('weather_source_mode', 'online_api')} · "
+            f"gespeicherte API-Datensätze: {len(weather_snapshot.get('requests', []))}"
+        )
 
     pdf_path_value = result.get("pdf_path")
     map_path_value = result.get("map_path")
@@ -2268,7 +2303,7 @@ root_path = "Database"
 
                         for filename in metadata.get("files", []):
                             suffix = Path(filename).suffix.lower()
-                            if suffix not in {".pdf", ".html", ".htm"}:
+                            if suffix not in {".pdf", ".html", ".htm", ".json"}:
                                 continue
                             try:
                                 content = db.load_calculation_binary(
@@ -2284,6 +2319,9 @@ root_path = "Database"
                                 loaded_result["pdf_path"] = str(target)
                             elif suffix in {".html", ".htm"}:
                                 loaded_result["map_path"] = str(target)
+                            elif filename == metadata.get("weather_file") or "weather_snapshot" in filename:
+                                loaded_result["weather_snapshot_path"] = str(target)
+                                settings["Wetterdatei Advanced Weather"] = str(target)
 
                         loaded_config = normalize_loaded_config(settings)
                         st.session_state.config = loaded_config
@@ -2359,11 +2397,21 @@ def main() -> None:
             st.info(f"Standardstrecke aus Repository aktiv: {config.get('GPX/FIT Datei')}")
 
     with file_col2:
-        weather_file = st.file_uploader("Wetterdatei Advanced Weather", type=["csv"])
+        weather_file = st.file_uploader(
+            "Wetterdatei Advanced Weather",
+            type=["csv", "json"],
+            help=(
+                "CSV verwendet das vereinfachte Wettermodell. Ein JSON-Snapshot "
+                "verwendet vollständig gespeicherte Open-Meteo-Daten ohne API-Aufruf."
+            ),
+        )
         weather_path = save_uploaded_file(weather_file)
         if weather_path:
             config["Wetterdatei Advanced Weather"] = weather_path
-            st.success(f"Wetterdatei geladen: {weather_file.name}")
+            if Path(weather_path).suffix.lower() == ".json":
+                st.success(f"Online-Wetter-Snapshot geladen: {weather_file.name}")
+            else:
+                st.success(f"Wetter-CSV geladen: {weather_file.name}")
 
     tab_keys = ["basis", "aero", "leistung", "wetter", "strecke", "ausgabe"]
     tabs = st.tabs([GROUP_TITLES[key] for key in tab_keys])
@@ -2458,6 +2506,17 @@ def main() -> None:
 
                     if isinstance(result, dict):
                         result["run_log"] = captured_log
+                        weather_snapshot = result.get("weather_snapshot")
+                        if weather_snapshot:
+                            weather_dir = Path(tempfile.gettempdir()) / "bike_power_weather_snapshots"
+                            weather_dir.mkdir(parents=True, exist_ok=True)
+                            safe_title = re.sub(r"[^A-Za-z0-9._-]+", "_", str(result.get("title", "weather"))).strip("_") or "weather"
+                            weather_path = weather_dir / f"{safe_title}_online_weather.json"
+                            weather_path.write_text(
+                                json.dumps(weather_snapshot, ensure_ascii=False, indent=2),
+                                encoding="utf-8",
+                            )
+                            result["weather_snapshot_path"] = str(weather_path)
 
                     st.session_state.result = result
                     st.session_state.run_log = captured_log
