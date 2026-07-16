@@ -74,7 +74,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.3.0"
+APP_VERSION = "3.3.1"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -2209,8 +2209,8 @@ root_path = "Database"
                         st.session_state.run_log = loaded_log
                         st.success("Ergebnisse wurden geladen.")
                         st.rerun()
-                    except GitHubDatabaseError as exc:
-                        st.error(str(exc))
+                    except (GitHubDatabaseError, json.JSONDecodeError) as exc:
+                        st.error(f"Ergebnisse konnten nicht geladen werden: {exc}")
 
                 if action_cols[1].button(
                     "Einstellungen laden",

@@ -1041,18 +1041,11 @@ class GitHubDatabase:
         event_id: str,
         calculation_id: str,
     ) -> dict[str, Any]:
-        loaded = self.get_json(
-            self._calculation_path(
-                event_id,
-                calculation_id,
-                "calculation.json",
-            )
+        return self.load_calculation_json(
+            event_id,
+            calculation_id,
+            "calculation.json",
         )
-        if loaded is None:
-            raise GitHubDatabaseError(
-                f"Berechnung {calculation_id} wurde nicht gefunden."
-            )
-        return loaded[0]
 
     def load_calculation_json(
         self,
@@ -1060,14 +1053,24 @@ class GitHubDatabase:
         calculation_id: str,
         filename: str,
     ) -> dict[str, Any]:
-        loaded = self.get_json(
-            self._calculation_path(event_id, calculation_id, filename)
-        )
-        if loaded is None:
+        path = self._calculation_path(event_id, calculation_id, filename)
+        content = self.get_file_raw(path)
+        if content is None:
             raise GitHubDatabaseError(
                 f"{filename} wurde in der Berechnung nicht gefunden."
             )
-        return loaded[0]
+        try:
+            return json.loads(content.decode("utf-8-sig"))
+        except UnicodeDecodeError as exc:
+            raise GitHubDatabaseError(
+                f"{filename} ist keine gültige UTF-8-Datei."
+            ) from exc
+        except json.JSONDecodeError as exc:
+            preview = content[:120].decode("utf-8", errors="replace").replace("\n", " ")
+            raise GitHubDatabaseError(
+                f"{filename} enthält kein gültiges JSON. "
+                f"Fehler an Position {exc.pos}; Dateianfang: {preview!r}"
+            ) from exc
 
     def load_calculation_text(
         self,
@@ -1075,12 +1078,12 @@ class GitHubDatabase:
         calculation_id: str,
         filename: str,
     ) -> str:
-        loaded = self.get_file(
+        content = self.get_file_raw(
             self._calculation_path(event_id, calculation_id, filename)
         )
-        if loaded is None:
+        if content is None:
             return ""
-        return loaded[0].decode("utf-8", errors="replace")
+        return content.decode("utf-8-sig", errors="replace")
 
     def load_calculation_binary(
         self,
@@ -1105,12 +1108,14 @@ class GitHubDatabase:
         for directory in directories:
             if directory.get("type") != "dir":
                 continue
-            loaded = self.get_json(
-                f"{directory.get('path')}/calculation.json"
-            )
-            if loaded is None:
+            metadata_path = f"{directory.get('path')}/calculation.json"
+            content = self.get_file_raw(metadata_path)
+            if content is None:
                 continue
-            metadata, _ = loaded
+            try:
+                metadata = json.loads(content.decode("utf-8-sig"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
             calculations.append(metadata)
 
         calculations.sort(

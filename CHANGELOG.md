@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.3.1
+- Laden gespeicherter Berechnungsdateien auf GitHub Raw-Media-Abruf umgestellt
+- Behebt JSONDecodeError bei per Git-Commit/Push gespeicherten Dateien
+- calculation.json, result.json, profiler.json und run_log.txt werden korrekt geladen
+- Verständlichere Fehlermeldung bei tatsächlich ungültigem JSON
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.3.0
 - Gespeicherte Berechnungen im GitHub-Event auswählen und laden
 - Aktionen: Ergebnisse laden, Einstellungen laden oder Alles laden
