@@ -668,6 +668,7 @@ class GitHubDatabase:
             }
             for item in items
             if item.get("type") == "file"
+            and item.get("name") != "event.json"
         ]
 
         chunks_root = f"{path}/.chunks"
@@ -698,6 +699,11 @@ class GitHubDatabase:
 
     def delete_event_file(self, event_id: str, filename: str) -> None:
         safe_name = filename.split("/")[-1]
+
+        if safe_name == "event.json":
+            raise GitHubDatabaseError(
+                "event.json ist eine geschützte Systemdatei und kann nicht gelöscht werden."
+            )
 
         if self._is_chunked_file(event_id, safe_name):
             chunk_dir = self._chunk_directory_path(event_id, safe_name)
@@ -1105,6 +1111,90 @@ class GitHubDatabase:
                 f"{filename} wurde in der Berechnung nicht gefunden."
             )
         return raw
+
+
+    def delete_calculation(
+        self,
+        event_id: str,
+        calculation_id: str,
+    ) -> None:
+        root = (
+            f"{self.config.normalized_root}/Events/{event_id}/"
+            f"calculations/{calculation_id}"
+        )
+
+        items = self.list_directory(root)
+        if not items:
+            raise GitHubDatabaseError(
+                f"Berechnung {calculation_id} wurde nicht gefunden."
+            )
+
+        repository_url = (
+            f"https://github.com/{self.config.owner}/{self.config.repo}.git"
+        )
+        with tempfile.TemporaryDirectory(prefix="bike-power-delete-calc-") as temp_dir:
+            self._run_git(
+                [
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--branch",
+                    self.config.branch,
+                    repository_url,
+                    temp_dir,
+                ],
+                timeout_s=180,
+            )
+
+            target = Path(temp_dir) / root
+            if not target.exists():
+                raise GitHubDatabaseError(
+                    f"Berechnungsverzeichnis {calculation_id} wurde nicht gefunden."
+                )
+
+            shutil.rmtree(target)
+
+            self._run_git(
+                ["config", "user.name", "Bike Power Calculator"],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                [
+                    "config",
+                    "user.email",
+                    "bike-power-calculator@users.noreply.github.com",
+                ],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                ["add", "-A", "--", root],
+                cwd=temp_dir,
+            )
+
+            status = self._run_git(
+                ["status", "--porcelain", "--", root],
+                cwd=temp_dir,
+            )
+            if not status.stdout.strip():
+                return
+
+            self._run_git(
+                [
+                    "commit",
+                    "-m",
+                    f"Delete calculation {calculation_id} from event {event_id}",
+                ],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                ["pull", "--rebase", "origin", self.config.branch],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                ["push", "origin", f"HEAD:{self.config.branch}"],
+                cwd=temp_dir,
+                timeout_s=180,
+            )
 
     def list_calculations(self, event_id: str) -> list[dict[str, Any]]:
         root = (

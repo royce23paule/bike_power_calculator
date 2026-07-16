@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.4.4
+- Gespeicherte Berechnungen können im Tab „Berechnungen“ dauerhaft gelöscht werden
+- Löschung umfasst calculation.json, result.json, settings_snapshot.json, profiler.json, Log, PDF und HTML
+- Explizite Löschbestätigung erforderlich
+- event.json wird in der Dateiansicht nicht mehr angezeigt
+- event.json ist zusätzlich serverseitig vor dem Löschen geschützt
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.4.3
 - Offline-Wetter wird unabhängig vom ursprünglichen Fahrzeitverlauf räumlich rekonstruiert
 - Exakte Treffer werden unverändert verwendet

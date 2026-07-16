@@ -74,7 +74,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.4.3"
+APP_VERSION = "3.4.4"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -2333,6 +2333,32 @@ root_path = "Database"
                         st.rerun()
                     except Exception as exc:
                         st.error(f"Berechnung konnte nicht geladen werden: {exc}")
+
+                st.divider()
+                confirm_delete = st.checkbox(
+                    "Löschen bestätigen",
+                    key=f"github_confirm_delete_calc_{calculation_id}",
+                    help=(
+                        "Die komplette gespeicherte Berechnung einschließlich "
+                        "Ergebnis, Einstellungen, Log, PDF und HTML wird gelöscht."
+                    ),
+                )
+                if st.button(
+                    "Berechnung dauerhaft löschen",
+                    key=f"github_delete_calc_{calculation_id}",
+                    disabled=not confirm_delete,
+                    use_container_width=True,
+                ):
+                    try:
+                        with st.spinner("Berechnung wird gelöscht …"):
+                            db.delete_calculation(
+                                selected_id,
+                                calculation_id,
+                            )
+                        st.success("Berechnung wurde dauerhaft gelöscht.")
+                        st.rerun()
+                    except GitHubDatabaseError as exc:
+                        st.error(f"Berechnung konnte nicht gelöscht werden: {exc}")
 
                 with st.expander("Metadaten anzeigen", expanded=False):
                     st.json(metadata)
