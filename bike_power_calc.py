@@ -293,9 +293,16 @@ def calc_rho_advanced(time):
     AdvWeather_AirDensity.append(rho)
     return rho
 
-# def _weather_request_key(latitude, longitude, start_time):
-    date_value = datetime.datetime.strptime(start_time, '%Y-%m-%dT%H:%M').date().isoformat()
-    return f"{float(latitude):.5f}|{float(longitude):.5f}|{date_value}"
+def _weather_request_key(latitude, longitude, start_time):
+    date_value = datetime.datetime.strptime(
+        str(start_time),
+        '%Y-%m-%dT%H:%M',
+    ).date().isoformat()
+    return (
+        f"{float(latitude):.5f}|"
+        f"{float(longitude):.5f}|"
+        f"{date_value}"
+    )
 
 
 def _hourly_data_to_snapshot(latitude, longitude, start_time, source_url):

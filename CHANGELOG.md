@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.4.1
+- Behoben: `_weather_request_key` war versehentlich auskommentiert
+- Online-Wetterberechnungen und Wetter-Snapshots funktionieren wieder
+- Wetter-Schlüssel werden stabil aus Koordinaten und Datum erzeugt
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.4.0
 - Vollständige Open-Meteo-Antworten werden als reproduzierbarer JSON-Wetter-Snapshot erfasst
 - JSON-Wetter-Snapshots können über denselben Wetterdatei-Upload wie CSV geladen werden
