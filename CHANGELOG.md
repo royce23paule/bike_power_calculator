@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.3.0
+- Gespeicherte Berechnungen im GitHub-Event auswählen und laden
+- Aktionen: Ergebnisse laden, Einstellungen laden oder Alles laden
+- Alles laden stellt Ergebnis, Profiler, Log, PDF und HTML-Karte wieder her
+- Neue Events erzeugen keine automatische settings.json mehr
+- Aktuelle Einstellungen können im Event unter frei wählbarem JSON-Dateinamen gespeichert werden
+- Alter lokaler Datenbankbereich vollständig aus Oberfläche und Paket entfernt
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.2.0
 - Aktuelle Berechnung direkt in einem ausgewählten GitHub-Event speichern
 - Eigene UUID und frei wählbarer Name pro Berechnung

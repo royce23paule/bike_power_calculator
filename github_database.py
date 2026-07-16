@@ -160,8 +160,17 @@ class GitHubDatabase:
             "created_at": now,
             "updated_at": now,
         }
-        self.put_json(self._event_path(event_id, "event.json"), event, f"Create event: {event['name']}")
-        self.put_json(self._event_path(event_id, "settings.json"), settings or {}, f"Save settings: {event['name']}")
+        self.put_json(
+            self._event_path(event_id, "event.json"),
+            event,
+            f"Create event: {event['name']}",
+        )
+        if settings is not None:
+            self.put_json(
+                self._event_path(event_id, "settings.json"),
+                settings,
+                f"Save settings: {event['name']}",
+            )
         index, sha = self.load_index()
         index["events"] = [e for e in index.get("events", []) if e.get("id") != event_id]
         index["events"].append({
@@ -999,6 +1008,93 @@ class GitHubDatabase:
             )
 
         return metadata
+
+
+    def save_named_settings(
+        self,
+        event_id: str,
+        filename: str,
+        settings: dict[str, Any],
+    ) -> str:
+        safe_name = filename.strip()
+        if not safe_name.lower().endswith(".json"):
+            safe_name += ".json"
+        safe_name = safe_name.replace("/", "_").replace("\\", "_")
+        if safe_name in {"event.json", "calculation.json", "result.json"}:
+            raise GitHubDatabaseError(
+                f"Der Dateiname {safe_name} ist reserviert."
+            )
+
+        path = self._event_path(event_id, safe_name)
+        existing = self.get_json(path)
+        existing_sha = existing[1] if existing else None
+        self.put_json(
+            path,
+            settings,
+            f"Save settings file: {safe_name}",
+            existing_sha,
+        )
+        return safe_name
+
+    def load_calculation_metadata(
+        self,
+        event_id: str,
+        calculation_id: str,
+    ) -> dict[str, Any]:
+        loaded = self.get_json(
+            self._calculation_path(
+                event_id,
+                calculation_id,
+                "calculation.json",
+            )
+        )
+        if loaded is None:
+            raise GitHubDatabaseError(
+                f"Berechnung {calculation_id} wurde nicht gefunden."
+            )
+        return loaded[0]
+
+    def load_calculation_json(
+        self,
+        event_id: str,
+        calculation_id: str,
+        filename: str,
+    ) -> dict[str, Any]:
+        loaded = self.get_json(
+            self._calculation_path(event_id, calculation_id, filename)
+        )
+        if loaded is None:
+            raise GitHubDatabaseError(
+                f"{filename} wurde in der Berechnung nicht gefunden."
+            )
+        return loaded[0]
+
+    def load_calculation_text(
+        self,
+        event_id: str,
+        calculation_id: str,
+        filename: str,
+    ) -> str:
+        loaded = self.get_file(
+            self._calculation_path(event_id, calculation_id, filename)
+        )
+        if loaded is None:
+            return ""
+        return loaded[0].decode("utf-8", errors="replace")
+
+    def load_calculation_binary(
+        self,
+        event_id: str,
+        calculation_id: str,
+        filename: str,
+    ) -> bytes:
+        path = self._calculation_path(event_id, calculation_id, filename)
+        raw = self.get_file_raw(path)
+        if raw is None:
+            raise GitHubDatabaseError(
+                f"{filename} wurde in der Berechnung nicht gefunden."
+            )
+        return raw
 
     def list_calculations(self, event_id: str) -> list[dict[str, Any]]:
         root = (
