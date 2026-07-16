@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.6.1"
+APP_VERSION = "3.7.0"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -1743,6 +1743,459 @@ def refresh_github_repository_statistics(db) -> None:
         st.session_state.pop("github_repository_statistics", None)
 
 
+
+COMPARISON_SERIES = {
+    "Geschwindigkeit": {
+        "keys": ["map_speed_kmh", "v"],
+        "y_title": "Geschwindigkeit [km/h]",
+    },
+    "Leistung": {
+        "keys": ["map_power_w", "power", "Power_fit"],
+        "y_title": "Leistung [W]",
+    },
+    "Windgeschwindigkeit": {
+        "keys": ["map_wind_kmh", "wind_speed_abs_List"],
+        "y_title": "Wind [km/h]",
+    },
+    "Windkomponente längs": {
+        "keys": ["map_wind_component_kmh", "v_w_List"],
+        "y_title": "Windkomponente [km/h]",
+    },
+    "Relative Luftgeschwindigkeit": {
+        "keys": ["map_air_speed_kmh", "air_speed_rel_List"],
+        "y_title": "Relative Luftgeschwindigkeit [km/h]",
+    },
+    "Höhe": {
+        "keys": ["map_elevation_m", "h", "h_raw"],
+        "y_title": "Höhe [m]",
+    },
+    "Steigung": {
+        "keys": ["map_grade_percent", "grade", "grade_raw"],
+        "y_title": "Steigung [%]",
+    },
+    "Luftdichte": {
+        "keys": ["rho_List"],
+        "y_title": "Luftdichte [kg/m³]",
+    },
+    "CdA": {
+        "keys": ["cdA_List"],
+        "y_title": "CdA [m²]",
+    },
+}
+
+
+def _first_series(result: dict[str, Any], keys: list[str]) -> list[float] | None:
+    for key in keys:
+        values = result.get(key)
+        if values is None:
+            continue
+        try:
+            array = np.asarray(values, dtype=float).reshape(-1)
+        except Exception:
+            continue
+        if array.size < 2:
+            continue
+        return array.tolist()
+    return None
+
+
+def _comparison_distance_axis(
+    result: dict[str, Any],
+    series_length: int,
+) -> tuple[np.ndarray, str]:
+    for key in ("map_distance_km", "pos"):
+        values = result.get(key)
+        if values is None:
+            continue
+        try:
+            distance = np.asarray(values, dtype=float).reshape(-1)
+        except Exception:
+            continue
+        if distance.size == series_length:
+            return distance, "Strecke [km]"
+
+    if series_length <= 1:
+        return np.asarray([0.0]), "Relative Strecke [%]"
+    return np.linspace(0.0, 100.0, series_length), "Relative Strecke [%]"
+
+
+def _comparison_metric_value(
+    result: dict[str, Any],
+    *keys: str,
+) -> Any:
+    for key in keys:
+        value = result.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def build_comparison_summary(
+    selected_results: list[dict[str, Any]],
+) -> pd.DataFrame:
+    rows = []
+    for item in selected_results:
+        result = item["result"]
+        duration = _comparison_metric_value(result, "duration_s")
+        row = {
+            "Berechnung": item["name"],
+            "Zeit": format_duration(duration),
+            "Zeit [s]": duration,
+            "Distanz [km]": _comparison_metric_value(
+                result,
+                "distance_km",
+            ),
+            "Ø Geschwindigkeit [km/h]": _comparison_metric_value(
+                result,
+                "average_speed_kmh",
+                "calibration_speed_kmh",
+            ),
+            "AP [W]": _comparison_metric_value(
+                result,
+                "average_power_w",
+                "calibration_ap",
+            ),
+            "NP [W]": _comparison_metric_value(
+                result,
+                "normalized_power_w",
+                "calibration_np",
+            ),
+            "CdA [m²]": _comparison_metric_value(
+                result,
+                "calibration_cda",
+            ),
+            "Höhenmeter [m]": _comparison_metric_value(
+                result,
+                "elevation_gain_m",
+            ),
+            "Wettermodell": result.get("weather_source_mode"),
+            "App-Version": result.get("app_version"),
+        }
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def render_saved_calculation_comparison(
+    db,
+    event_id: str,
+    calculations: list[dict[str, Any]],
+) -> None:
+    valid_calculations = [
+        item for item in calculations
+        if item.get("_integrity", {}).get("status") == "ok"
+    ]
+    if len(valid_calculations) < 2:
+        st.info(
+            "Für einen Vergleich werden mindestens zwei vollständige "
+            "gespeicherte Berechnungen benötigt."
+        )
+        return
+
+    label_to_id = {}
+    metadata_by_id = {}
+    for item in valid_calculations:
+        calculation_id = item.get("id")
+        label = (
+            f"{item.get('name', calculation_id)} · "
+            f"{str(item.get('created_at', ''))[:16].replace('T', ' ')}"
+        )
+        if label in label_to_id:
+            label = f"{label} · {calculation_id}"
+        label_to_id[label] = calculation_id
+        metadata_by_id[calculation_id] = item
+
+    default_labels = list(label_to_id.keys())[: min(3, len(label_to_id))]
+    selected_labels = st.multiselect(
+        "Berechnungen auswählen",
+        options=list(label_to_id.keys()),
+        default=default_labels,
+        key=f"github_comparison_selection_{event_id}",
+        help="Mindestens zwei, maximal acht Berechnungen auswählen.",
+    )
+
+    if len(selected_labels) < 2:
+        st.info("Bitte mindestens zwei Berechnungen auswählen.")
+        return
+    if len(selected_labels) > 8:
+        st.warning("Für eine übersichtliche Darstellung werden maximal acht Berechnungen verwendet.")
+        selected_labels = selected_labels[:8]
+
+    selection_signature = "|".join(label_to_id[label] for label in selected_labels)
+    cache_key = f"github_comparison_results_{event_id}"
+    signature_key = f"github_comparison_signature_{event_id}"
+
+    if (
+        st.session_state.get(signature_key) != selection_signature
+        or cache_key not in st.session_state
+    ):
+        loaded_results = []
+        try:
+            with st.spinner("Gespeicherte Berechnungen werden geladen …"):
+                for label in selected_labels:
+                    calculation_id = label_to_id[label]
+                    result = db.load_calculation_json(
+                        event_id,
+                        calculation_id,
+                        "result.json",
+                    )
+                    loaded_results.append(
+                        {
+                            "id": calculation_id,
+                            "name": metadata_by_id[calculation_id].get(
+                                "name",
+                                calculation_id,
+                            ),
+                            "metadata": metadata_by_id[calculation_id],
+                            "result": result,
+                        }
+                    )
+            st.session_state[cache_key] = loaded_results
+            st.session_state[signature_key] = selection_signature
+        except GitHubDatabaseError as exc:
+            st.error(f"Vergleichsdaten konnten nicht geladen werden: {exc}")
+            return
+
+    selected_results = st.session_state.get(cache_key, [])
+    if len(selected_results) < 2:
+        return
+
+    st.markdown("### Kennzahlenvergleich")
+    summary_df = build_comparison_summary(selected_results)
+
+    display_columns = [
+        "Berechnung",
+        "Zeit",
+        "Distanz [km]",
+        "Ø Geschwindigkeit [km/h]",
+        "AP [W]",
+        "NP [W]",
+        "CdA [m²]",
+        "Höhenmeter [m]",
+        "Wettermodell",
+    ]
+    available_columns = [
+        column for column in display_columns
+        if column in summary_df.columns
+    ]
+    st.dataframe(
+        summary_df[available_columns],
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.download_button(
+        "Vergleichstabelle als CSV herunterladen",
+        data=summary_df.to_csv(index=False).encode("utf-8"),
+        file_name="berechnungsvergleich.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+    numeric_options = {
+        "Fahrzeit [min]": (
+            "duration_s",
+            lambda value: float(value) / 60.0,
+        ),
+        "Ø Geschwindigkeit [km/h]": (
+            "average_speed_kmh",
+            float,
+        ),
+        "Average Power [W]": (
+            "average_power_w",
+            float,
+        ),
+        "Normalized Power [W]": (
+            "normalized_power_w",
+            float,
+        ),
+        "CdA [m²]": (
+            "calibration_cda",
+            float,
+        ),
+    }
+    overview_metric = st.selectbox(
+        "Kennzahl für Balkenvergleich",
+        list(numeric_options.keys()),
+        key=f"github_comparison_metric_{event_id}",
+    )
+    metric_key, converter = numeric_options[overview_metric]
+    bar_rows = []
+    for item in selected_results:
+        result = item["result"]
+        value = result.get(metric_key)
+        if value is None and metric_key == "average_power_w":
+            value = result.get("calibration_ap")
+        if value is None and metric_key == "normalized_power_w":
+            value = result.get("calibration_np")
+        if value is None:
+            continue
+        try:
+            value = converter(value)
+        except Exception:
+            continue
+        bar_rows.append(
+            {
+                "Berechnung": item["name"],
+                overview_metric: value,
+            }
+        )
+    if bar_rows:
+        bar_df = pd.DataFrame(bar_rows).set_index("Berechnung")
+        st.bar_chart(bar_df)
+
+    st.markdown("### Gemeinsame Verlaufskurven")
+    series_name = st.selectbox(
+        "Zeitreihe auswählen",
+        list(COMPARISON_SERIES.keys()),
+        key=f"github_comparison_series_{event_id}",
+    )
+    series_definition = COMPARISON_SERIES[series_name]
+
+    figure = go.Figure()
+    added = 0
+    x_title = "Strecke [km]"
+    for item in selected_results:
+        values = _first_series(
+            item["result"],
+            series_definition["keys"],
+        )
+        if values is None:
+            continue
+
+        y_values = np.asarray(values, dtype=float)
+        x_values, current_x_title = _comparison_distance_axis(
+            item["result"],
+            len(y_values),
+        )
+        x_title = current_x_title
+
+        valid = np.isfinite(x_values) & np.isfinite(y_values)
+        if not np.any(valid):
+            continue
+
+        max_points = 2500
+        valid_x = x_values[valid]
+        valid_y = y_values[valid]
+        if valid_x.size > max_points:
+            indices = np.linspace(
+                0,
+                valid_x.size - 1,
+                max_points,
+            ).astype(int)
+            valid_x = valid_x[indices]
+            valid_y = valid_y[indices]
+
+        figure.add_trace(
+            go.Scatter(
+                x=valid_x,
+                y=valid_y,
+                mode="lines",
+                name=item["name"],
+                hovertemplate=(
+                    "%{x:.2f}<br>%{y:.2f}<extra>%{fullData.name}</extra>"
+                ),
+            )
+        )
+        added += 1
+
+    if added:
+        figure.update_layout(
+            xaxis_title=x_title,
+            yaxis_title=series_definition["y_title"],
+            legend_title="Berechnung",
+            hovermode="x unified",
+            height=560,
+            margin=dict(l=20, r=20, t=30, b=20),
+        )
+        st.plotly_chart(
+            figure,
+            use_container_width=True,
+            key=f"github_comparison_chart_{event_id}_{series_name}",
+        )
+    else:
+        st.info(
+            f"Für „{series_name}“ sind in den ausgewählten Berechnungen "
+            "keine vergleichbaren Zeitreihen gespeichert."
+        )
+
+    st.markdown("### Differenzen zur Referenz")
+    reference_name = st.selectbox(
+        "Referenzberechnung",
+        [item["name"] for item in selected_results],
+        key=f"github_comparison_reference_{event_id}",
+    )
+    reference = next(
+        item for item in selected_results
+        if item["name"] == reference_name
+    )
+    reference_result = reference["result"]
+    difference_rows = []
+    for item in selected_results:
+        result = item["result"]
+        duration_delta = None
+        speed_delta = None
+        ap_delta = None
+        np_delta = None
+
+        if (
+            result.get("duration_s") is not None
+            and reference_result.get("duration_s") is not None
+        ):
+            duration_delta = (
+                float(result["duration_s"])
+                - float(reference_result["duration_s"])
+            )
+        if (
+            result.get("average_speed_kmh") is not None
+            and reference_result.get("average_speed_kmh") is not None
+        ):
+            speed_delta = (
+                float(result["average_speed_kmh"])
+                - float(reference_result["average_speed_kmh"])
+            )
+
+        result_ap = _comparison_metric_value(
+            result,
+            "average_power_w",
+            "calibration_ap",
+        )
+        reference_ap = _comparison_metric_value(
+            reference_result,
+            "average_power_w",
+            "calibration_ap",
+        )
+        if result_ap is not None and reference_ap is not None:
+            ap_delta = float(result_ap) - float(reference_ap)
+
+        result_np = _comparison_metric_value(
+            result,
+            "normalized_power_w",
+            "calibration_np",
+        )
+        reference_np = _comparison_metric_value(
+            reference_result,
+            "normalized_power_w",
+            "calibration_np",
+        )
+        if result_np is not None and reference_np is not None:
+            np_delta = float(result_np) - float(reference_np)
+
+        difference_rows.append(
+            {
+                "Berechnung": item["name"],
+                "Δ Zeit [s]": duration_delta,
+                "Δ Geschwindigkeit [km/h]": speed_delta,
+                "Δ AP [W]": ap_delta,
+                "Δ NP [W]": np_delta,
+            }
+        )
+
+    st.dataframe(
+        pd.DataFrame(difference_rows),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
 def render_github_database_sidebar() -> None:
     db = get_github_database()
 
@@ -1819,7 +2272,7 @@ root_path = "Database"
         st.error(str(exc))
         return
 
-    tabs = st.tabs(["Events", "Neu", "Bearbeiten", "Dateien", "Berechnungen", "Backup"])
+    tabs = st.tabs(["Events", "Neu", "Bearbeiten", "Dateien", "Berechnungen", "Vergleich", "Backup"])
 
     with tabs[0]:
         search = st.text_input("Suchen", key="github_database_search").strip().lower()
@@ -2541,7 +2994,29 @@ root_path = "Database"
                 with st.expander("Metadaten anzeigen", expanded=False):
                     st.json(metadata)
 
+
     with tabs[5]:
+        selected_id = st.session_state.get(
+            "github_database_selected_event"
+        )
+        if not selected_id:
+            st.info("Zuerst im Tab „Events“ ein Event auswählen.")
+        else:
+            try:
+                comparison_event = db.load_event(selected_id)
+                comparison_calculations = db.list_calculations(selected_id)
+                st.markdown(
+                    f"**Vergleich für {comparison_event.get('name', selected_id)}**"
+                )
+                render_saved_calculation_comparison(
+                    db,
+                    selected_id,
+                    comparison_calculations,
+                )
+            except GitHubDatabaseError as exc:
+                st.error(f"Vergleich konnte nicht geöffnet werden: {exc}")
+
+    with tabs[6]:
         st.markdown("**Event-ZIP importieren**")
         backup_upload = st.file_uploader(
             "Event-Backup auswählen",

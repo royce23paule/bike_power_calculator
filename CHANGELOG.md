@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.7.0
+- Neuer Tab „Vergleich“ für gespeicherte Berechnungen eines Events
+- Zwei bis acht vollständige Berechnungen gleichzeitig auswählbar
+- Gemeinsame Kennzahlentabelle mit Zeit, Geschwindigkeit, AP, NP, CdA und Höhenmetern
+- Vergleichstabelle als CSV exportierbar
+- Balkenvergleich für Fahrzeit, Geschwindigkeit, AP, NP und CdA
+- Gemeinsame interaktive Verlaufskurven über Strecke oder relative Strecke
+- Vergleich von Geschwindigkeit, Leistung, Wind, Luftgeschwindigkeit, Höhe, Steigung, Luftdichte und CdA
+- Differenztabelle gegenüber einer frei wählbaren Referenzberechnung
+- Vergleichs-Engine als Grundlage für spätere Parameterstudien
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.6.1
 - Event-Löschung entfernt rekursiv das vollständige Eventverzeichnis
 - Alle Berechnungen, PDF-, HTML-, Wetter-, Eingabe- und versteckten Dateien werden mitgelöscht
