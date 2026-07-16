@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import tempfile
 import hashlib
+import io
+import zipfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -719,6 +721,187 @@ class GitHubDatabase:
             self._event_path(event_id, safe_name),
             f"Delete {safe_name} from event {event_id}",
         )
+
+
+    def event_file_sha256(self, event_id: str, filename: str) -> str:
+        safe_name = filename.split("/")[-1]
+        if safe_name == "event.json":
+            raise GitHubDatabaseError(
+                "event.json ist eine geschützte Systemdatei."
+            )
+        content = self.load_event_file(event_id, safe_name)
+        return hashlib.sha256(content).hexdigest()
+
+    def rename_event_file(
+        self,
+        event_id: str,
+        old_filename: str,
+        new_filename: str,
+    ) -> str:
+        old_name = old_filename.split("/")[-1]
+        new_name = new_filename.strip().replace("/", "_").replace("\\", "_")
+
+        if old_name == "event.json":
+            raise GitHubDatabaseError(
+                "event.json ist eine geschützte Systemdatei und kann nicht umbenannt werden."
+            )
+        if not new_name:
+            raise GitHubDatabaseError("Bitte einen neuen Dateinamen eingeben.")
+        if new_name == "event.json":
+            raise GitHubDatabaseError(
+                "Der Dateiname event.json ist reserviert."
+            )
+        if old_name == new_name:
+            return new_name
+
+        existing_names = {
+            str(item.get("name"))
+            for item in self.list_event_files(event_id)
+        }
+        if new_name in existing_names:
+            raise GitHubDatabaseError(
+                f"Die Datei {new_name} existiert bereits."
+            )
+
+        root = f"{self.config.normalized_root}/Events/{event_id}"
+        repository_url = (
+            f"https://github.com/{self.config.owner}/{self.config.repo}.git"
+        )
+
+        with tempfile.TemporaryDirectory(prefix="bike-power-rename-file-") as temp_dir:
+            self._run_git(
+                [
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--branch",
+                    self.config.branch,
+                    repository_url,
+                    temp_dir,
+                ],
+                timeout_s=180,
+            )
+
+            source = Path(temp_dir) / root / old_name
+            target = Path(temp_dir) / root / new_name
+
+            # Legacy chunked files are represented below .chunks.
+            if not source.exists():
+                chunk_source = (
+                    Path(temp_dir)
+                    / root
+                    / ".chunks"
+                    / quote(old_name, safe="")
+                )
+                if chunk_source.exists():
+                    chunk_target = (
+                        Path(temp_dir)
+                        / root
+                        / ".chunks"
+                        / quote(new_name, safe="")
+                    )
+                    chunk_target.parent.mkdir(parents=True, exist_ok=True)
+                    chunk_source.rename(chunk_target)
+                    manifest = chunk_target / "manifest.json"
+                    if manifest.exists():
+                        payload = json.loads(manifest.read_text(encoding="utf-8"))
+                        payload["filename"] = new_name
+                        manifest.write_text(
+                            json.dumps(payload, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                else:
+                    raise GitHubDatabaseError(
+                        f"Die Datei {old_name} wurde nicht gefunden."
+                    )
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source.rename(target)
+
+            self._run_git(
+                ["config", "user.name", "Bike Power Calculator"],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                [
+                    "config",
+                    "user.email",
+                    "bike-power-calculator@users.noreply.github.com",
+                ],
+                cwd=temp_dir,
+            )
+            self._run_git(["add", "-A", "--", root], cwd=temp_dir)
+            self._run_git(
+                [
+                    "commit",
+                    "-m",
+                    f"Rename event file: {old_name} to {new_name}",
+                ],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                ["pull", "--rebase", "origin", self.config.branch],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                ["push", "origin", f"HEAD:{self.config.branch}"],
+                cwd=temp_dir,
+                timeout_s=180,
+            )
+
+        return new_name
+
+    def export_event_zip(self, event_id: str) -> tuple[str, bytes]:
+        event = self.load_event(event_id)
+        root = f"{self.config.normalized_root}/Events/{event_id}"
+        repository_url = (
+            f"https://github.com/{self.config.owner}/{self.config.repo}.git"
+        )
+
+        with tempfile.TemporaryDirectory(prefix="bike-power-export-event-") as temp_dir:
+            self._run_git(
+                [
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--branch",
+                    self.config.branch,
+                    repository_url,
+                    temp_dir,
+                ],
+                timeout_s=180,
+            )
+
+            event_dir = Path(temp_dir) / root
+            if not event_dir.exists():
+                raise GitHubDatabaseError(
+                    f"Eventverzeichnis {event_id} wurde nicht gefunden."
+                )
+
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(
+                buffer,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
+            ) as archive:
+                for path in event_dir.rglob("*"):
+                    if not path.is_file():
+                        continue
+                    archive.write(
+                        path,
+                        arcname=(
+                            f"{event.get('name', event_id)}_{event_id}/"
+                            f"{path.relative_to(event_dir).as_posix()}"
+                        ),
+                    )
+
+            safe_event_name = "".join(
+                character if character.isalnum() or character in "._-"
+                else "_"
+                for character in str(event.get("name", event_id))
+            ).strip("_") or event_id
+            filename = f"{safe_event_name}_{event_id}_backup.zip"
+            return filename, buffer.getvalue()
 
     def update_event(
         self,

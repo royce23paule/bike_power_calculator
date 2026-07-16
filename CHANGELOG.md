@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.5.0
+- Vollständiges Dateimanagement im GitHub-Event
+- Event-Dateien können geladen, heruntergeladen, umbenannt und bestätigt gelöscht werden
+- JSON-Wetter-Snapshots werden automatisch als Wetterdatei erkannt
+- Dateityp, Größe und SHA-256-Prüfsumme werden angezeigt
+- event.json bleibt unsichtbar und gegen Löschen sowie Umbenennen geschützt
+- Gesamtes Event kann einschließlich Berechnungen als ZIP-Backup exportiert werden
+- Verbliebene automatische settings.json-Option beim Bearbeiten eines Events entfernt
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.4.4
 - Gespeicherte Berechnungen können im Tab „Berechnungen“ dauerhaft gelöscht werden
 - Löschung umfasst calculation.json, result.json, settings_snapshot.json, profiler.json, Log, PDF und HTML

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import hashlib
 import json
 import shutil
 import uuid
@@ -74,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.4.4"
+APP_VERSION = "3.5.0"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -1926,10 +1927,6 @@ root_path = "Database"
                         value=", ".join(event.get("tags", [])),
                     )
                     notes = st.text_area("Notizen", value=event.get("notes", ""))
-                    update_settings = st.checkbox(
-                        "Aktuelle Einstellungen als settings.json übernehmen",
-                        value=False,
-                    )
                     save_changes = st.form_submit_button("Änderungen speichern")
 
                 if save_changes:
@@ -1942,7 +1939,7 @@ root_path = "Database"
                             sport=sport,
                             tags=[tag.strip() for tag in tags_text.split(",") if tag.strip()],
                             notes=notes,
-                            settings=dict(st.session_state.config) if update_settings else None,
+                            settings=None,
                         )
                         st.success("Event wurde aktualisiert.")
                         st.rerun()
@@ -2072,12 +2069,16 @@ root_path = "Database"
             else:
                 file_df = pd.DataFrame(files)
                 file_df["size_kb"] = file_df["size"].fillna(0) / 1024
+                file_df["type"] = file_df["name"].map(
+                    lambda name: Path(str(name)).suffix.lower().lstrip(".").upper() or "DATEI"
+                )
                 if "storage" not in file_df.columns:
                     file_df["storage"] = "direct"
                 st.dataframe(
-                    file_df[["name", "size_kb", "storage"]].rename(
+                    file_df[["name", "type", "size_kb", "storage"]].rename(
                         columns={
                             "name": "Datei",
+                            "type": "Typ",
                             "size_kb": "Größe [KB]",
                             "storage": "Speicherung",
                         }
@@ -2099,6 +2100,12 @@ root_path = "Database"
                     st.error(str(exc))
 
                 if content is not None:
+                    checksum = hashlib.sha256(content).hexdigest()
+                    st.caption(
+                        f"Größe: {len(content) / 1024:.2f} KB · "
+                        f"SHA-256: `{checksum}`"
+                    )
+
                     st.download_button(
                         "Datei herunterladen",
                         data=content,
@@ -2111,25 +2118,36 @@ root_path = "Database"
                     if suffix == ".json":
                         if action_cols[0].button(
                             "Als Einstellungen laden",
-                            key=f"github_load_json_file_{selected_id}",
+                            key=f"github_load_json_file_{selected_id}_{selected_file}",
                             use_container_width=True,
                         ):
                             try:
-                                loaded = json.loads(content.decode("utf-8"))
-                                loaded_config = normalize_loaded_config(loaded)
-                                st.session_state.config = loaded_config
-                                sync_widgets_from_config(loaded_config)
-                                st.success("JSON wurde als Einstellungen geladen.")
+                                loaded = json.loads(content.decode("utf-8-sig"))
+                                if loaded.get("schema") == "bike_power_weather_snapshot":
+                                    runtime_dir = Path(tempfile.gettempdir()) / "bike_power_event_files"
+                                    runtime_dir.mkdir(parents=True, exist_ok=True)
+                                    target = runtime_dir / Path(selected_file).name
+                                    target.write_bytes(content)
+                                    config = dict(st.session_state.config)
+                                    config["Wetterdatei Advanced Weather"] = str(target)
+                                    st.session_state.config = normalize_loaded_config(config)
+                                    sync_widgets_from_config(st.session_state.config)
+                                    st.success("Online-Wetter-Snapshot wurde in die App geladen.")
+                                else:
+                                    loaded_config = normalize_loaded_config(loaded)
+                                    st.session_state.config = loaded_config
+                                    sync_widgets_from_config(loaded_config)
+                                    st.success("JSON wurde als Einstellungen geladen.")
                                 st.rerun()
                             except Exception as exc:
                                 st.error(f"JSON konnte nicht geladen werden: {exc}")
                     elif suffix in {".gpx", ".fit", ".csv"}:
                         if action_cols[0].button(
                             "In App laden",
-                            key=f"github_load_data_file_{selected_id}",
+                            key=f"github_load_data_file_{selected_id}_{selected_file}",
                             use_container_width=True,
                         ):
-                            runtime_dir = Path("runtime_uploads")
+                            runtime_dir = Path(tempfile.gettempdir()) / "bike_power_event_files"
                             runtime_dir.mkdir(parents=True, exist_ok=True)
                             target = runtime_dir / Path(selected_file).name
                             target.write_bytes(content)
@@ -2145,20 +2163,77 @@ root_path = "Database"
                             st.success(f"{selected_file} wurde in die App geladen.")
                             st.rerun()
 
+                    new_filename = st.text_input(
+                        "Neuer Dateiname",
+                        value=selected_file,
+                        key=f"github_rename_file_name_{selected_id}_{selected_file}",
+                    )
                     if action_cols[1].button(
-                        "Datei löschen",
-                        key=f"github_delete_file_{selected_id}",
+                        "Datei umbenennen",
+                        key=f"github_rename_file_{selected_id}_{selected_file}",
                         use_container_width=True,
                     ):
                         try:
-                            db.delete_event_file(
+                            renamed = db.rename_event_file(
                                 selected_id,
                                 selected_file,
+                                new_filename,
                             )
+                            st.success(f"Datei wurde in {renamed} umbenannt.")
+                            st.rerun()
+                        except GitHubDatabaseError as exc:
+                            st.error(str(exc))
+
+                    st.markdown("**Datei löschen**")
+                    confirm_file_delete = st.checkbox(
+                        f"„{selected_file}“ dauerhaft löschen",
+                        key=f"github_confirm_delete_file_{selected_id}_{selected_file}",
+                    )
+                    if st.button(
+                        "Datei dauerhaft löschen",
+                        key=f"github_delete_file_{selected_id}_{selected_file}",
+                        disabled=not confirm_file_delete,
+                        use_container_width=True,
+                    ):
+                        try:
+                            db.delete_event_file(selected_id, selected_file)
                             st.success(f"{selected_file} wurde gelöscht.")
                             st.rerun()
                         except GitHubDatabaseError as exc:
                             st.error(str(exc))
+
+            st.divider()
+            st.markdown("**Event-Backup**")
+            st.caption(
+                "Exportiert event.json, Eingabedateien, Einstellungen, Wetterdaten "
+                "und alle gespeicherten Berechnungen als ZIP."
+            )
+            if st.button(
+                "Event-ZIP vorbereiten",
+                key=f"github_prepare_event_zip_{selected_id}",
+                use_container_width=True,
+            ):
+                try:
+                    with st.spinner("Event-Backup wird erstellt …"):
+                        backup_name, backup_content = db.export_event_zip(selected_id)
+                    st.session_state[f"github_event_zip_{selected_id}"] = (
+                        backup_name,
+                        backup_content,
+                    )
+                    st.success("Event-Backup wurde erstellt.")
+                except GitHubDatabaseError as exc:
+                    st.error(f"Event-Backup konnte nicht erstellt werden: {exc}")
+
+            backup = st.session_state.get(f"github_event_zip_{selected_id}")
+            if backup:
+                backup_name, backup_content = backup
+                st.download_button(
+                    "Gesamtes Event als ZIP herunterladen",
+                    data=backup_content,
+                    file_name=backup_name,
+                    mime="application/zip",
+                    use_container_width=True,
+                )
 
     with tabs[4]:
         selected_id = st.session_state.get("github_database_selected_event")
