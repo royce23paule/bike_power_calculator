@@ -396,20 +396,20 @@ def _haversine_distance_km(lat1, lon1, lat2, lon2):
     return 2.0 * radius_km * math.asin(min(1.0, math.sqrt(a)))
 
 
-def _find_nearest_weather_snapshot(latitude, longitude, start_time, max_distance_km=2.0):
+def _snapshot_date(item):
+    item_date = str(item.get("requested_start_time", ""))[:10]
+    if item_date:
+        return item_date
+    dates = item.get("date") or []
+    return str(dates[0])[:10] if dates else ""
+
+
+def _find_weather_snapshot_candidates(latitude, longitude, start_time):
     target_date = str(start_time)[:10]
-    nearest = None
-    nearest_distance = None
-
+    candidates = []
     for item in _weather_snapshot_requests:
-        item_date = str(item.get("requested_start_time", ""))[:10]
-        if not item_date:
-            dates = item.get("date") or []
-            item_date = str(dates[0])[:10] if dates else ""
-
-        if item_date != target_date:
+        if _snapshot_date(item) != target_date:
             continue
-
         try:
             distance_km = _haversine_distance_km(
                 latitude,
@@ -419,16 +419,85 @@ def _find_nearest_weather_snapshot(latitude, longitude, start_time, max_distance
             )
         except (TypeError, ValueError):
             continue
+        candidates.append((distance_km, item))
+    candidates.sort(key=lambda pair: pair[0])
+    return candidates
 
-        if nearest_distance is None or distance_km < nearest_distance:
-            nearest = item
-            nearest_distance = distance_km
 
-    if nearest is None or nearest_distance is None:
-        return None, None
+def _interpolate_direction_arrays(values_a, values_b, weight_b):
+    angles_a = np.radians(np.asarray(values_a, dtype=float))
+    angles_b = np.radians(np.asarray(values_b, dtype=float))
+    weight_a = 1.0 - float(weight_b)
+    x = weight_a * np.cos(angles_a) + float(weight_b) * np.cos(angles_b)
+    y = weight_a * np.sin(angles_a) + float(weight_b) * np.sin(angles_b)
+    return (np.degrees(np.arctan2(y, x)) + 360.0) % 360.0
+
+
+def _interpolate_weather_snapshots(snapshot_a, snapshot_b, distance_a, distance_b):
+    data_a = _snapshot_to_hourly_data(snapshot_a)
+    data_b = _snapshot_to_hourly_data(snapshot_b)
+
+    dates_a = pd.DatetimeIndex(data_a["date"])
+    dates_b = pd.DatetimeIndex(data_b["date"])
+    if len(dates_a) != len(dates_b) or not dates_a.equals(dates_b):
+        return data_a if distance_a <= distance_b else data_b
+
+    total_distance = float(distance_a) + float(distance_b)
+    weight_b = 0.5 if total_distance <= 1e-12 else float(distance_a) / total_distance
+    weight_a = 1.0 - weight_b
+
+    result = {"date": dates_a}
+    linear_fields = (
+        "temperature_2m",
+        "relative_humidity_2m",
+        "apparent_temperature",
+        "precipitation",
+        "surface_pressure",
+        "wind_speed_10m",
+        "wind_gusts_10m",
+    )
+    for field in linear_fields:
+        result[field] = (
+            weight_a * np.asarray(data_a[field], dtype=float)
+            + weight_b * np.asarray(data_b[field], dtype=float)
+        )
+
+    result["wind_direction_10m"] = _interpolate_direction_arrays(
+        data_a["wind_direction_10m"],
+        data_b["wind_direction_10m"],
+        weight_b,
+    )
+    return result
+
+
+def _resolve_weather_snapshot(latitude, longitude, start_time, max_distance_km=15.0):
+    request_key = _weather_request_key(latitude, longitude, start_time)
+    exact = _weather_snapshot_lookup.get(request_key)
+    if exact is not None:
+        return _snapshot_to_hourly_data(exact), 0.0, "exact"
+
+    candidates = _find_weather_snapshot_candidates(latitude, longitude, start_time)
+    if not candidates:
+        return None, None, "missing"
+
+    nearest_distance, nearest = candidates[0]
     if nearest_distance > float(max_distance_km):
-        return None, nearest_distance
-    return nearest, nearest_distance
+        return None, nearest_distance, "too_far"
+
+    if len(candidates) == 1 or nearest_distance < 0.05:
+        return _snapshot_to_hourly_data(nearest), nearest_distance, "nearest"
+
+    second_distance, second = candidates[1]
+    if second_distance > float(max_distance_km):
+        return _snapshot_to_hourly_data(nearest), nearest_distance, "nearest"
+
+    interpolated = _interpolate_weather_snapshots(
+        nearest,
+        second,
+        nearest_distance,
+        second_distance,
+    )
+    return interpolated, nearest_distance, "interpolated"
 
 
 def Get_API_Data(latitude,longitude,StratTime):
@@ -436,31 +505,26 @@ def Get_API_Data(latitude,longitude,StratTime):
     global _weather_snapshot_requests, _weather_snapshot_lookup
     request_key = _weather_request_key(latitude, longitude, StratTime)
     if _weather_snapshot_offline:
-        snapshot = _weather_snapshot_lookup.get(request_key)
-        matched_distance_km = 0.0
-
-        if snapshot is None:
-            snapshot, matched_distance_km = _find_nearest_weather_snapshot(
-                latitude,
-                longitude,
-                StratTime,
-                max_distance_km=2.0,
-            )
-
-        if snapshot is None:
+        resolved_data, nearest_distance_km, resolution_mode = _resolve_weather_snapshot(
+            latitude,
+            longitude,
+            StratTime,
+            max_distance_km=15.0,
+        )
+        if resolved_data is None:
             distance_note = ""
-            if matched_distance_km is not None:
+            if nearest_distance_km is not None:
                 distance_note = (
                     f" Der nächste vorhandene Punkt liegt "
-                    f"{matched_distance_km:.2f} km entfernt."
+                    f"{nearest_distance_km:.2f} km entfernt."
                 )
             raise ValueError(
-                'Im geladenen Online-Wetter-Snapshot fehlen Daten für '
+                'Im geladenen Online-Wetter-Snapshot fehlen räumlich passende Daten für '
                 f'{float(latitude):.5f}, {float(longitude):.5f} '
                 f'am {StratTime[:10]}.{distance_note}'
             )
 
-        hourly_data = _snapshot_to_hourly_data(snapshot)
+        hourly_data = resolved_data
         API_Cache_Hits += 1
         _prepare_fast_weather_arrays()
         return

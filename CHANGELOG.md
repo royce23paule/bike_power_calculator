@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.4.3
+- Offline-Wetter wird unabhängig vom ursprünglichen Fahrzeitverlauf räumlich rekonstruiert
+- Exakte Treffer werden unverändert verwendet
+- Sonst Interpolation aus den zwei nächstgelegenen Snapshot-Punkten desselben Tages
+- Temperatur, Feuchte, Druck, Niederschlag, Windgeschwindigkeit und Böen linear interpoliert
+- Windrichtung zirkulär über Vektorkomponenten interpoliert
+- Räumlicher Sicherheitsradius auf 15 km erweitert; außerhalb weiterhin bewusster Abbruch
+- Keine Änderung der übrigen Berechnungsphysik
+
+
 ## 3.4.2
 - Offline-Wetter-Snapshots verwenden bei fehlendem exakten Schlüssel den nächstgelegenen Wetterpunkt desselben Tages
 - Maximale räumliche Zuordnungstoleranz: 2,0 km
