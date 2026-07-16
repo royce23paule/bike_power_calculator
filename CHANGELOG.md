@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.7.2
+- Behebt StreamlitDuplicateElementKey im Analysebereich
+- Jede Instanz der Vergleichs-Engine verwendet jetzt einen eigenen Key-Präfix
+- Übersicht und Diagramme besitzen getrennte Widget- und Session-State-Schlüssel
+- Auswahl, Cache, Kennzahl, Zeitreihe, Referenz und Plotly-Chart sind eindeutig
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.7.1
 - Neue Hauptnavigation mit Rechner, Analyse und Datenbank
 - Vergleich aus der Datenbankverwaltung in den eigenständigen Analysebereich verschoben

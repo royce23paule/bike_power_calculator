@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.7.1"
+APP_VERSION = "3.7.2"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -1883,6 +1883,7 @@ def render_saved_calculation_comparison(
     show_summary_section: bool = True,
     show_series_section: bool = True,
     show_difference_section: bool = True,
+    key_prefix: str = "comparison",
 ) -> None:
     valid_calculations = [
         item for item in calculations
@@ -1913,7 +1914,7 @@ def render_saved_calculation_comparison(
         "Berechnungen auswählen",
         options=list(label_to_id.keys()),
         default=default_labels,
-        key=f"github_comparison_selection_{event_id}",
+        key=f"{key_prefix}_selection_{event_id}",
         help="Mindestens zwei, maximal acht Berechnungen auswählen.",
     )
 
@@ -1925,8 +1926,8 @@ def render_saved_calculation_comparison(
         selected_labels = selected_labels[:8]
 
     selection_signature = "|".join(label_to_id[label] for label in selected_labels)
-    cache_key = f"github_comparison_results_{event_id}"
-    signature_key = f"github_comparison_signature_{event_id}"
+    cache_key = f"{key_prefix}_results_{event_id}"
+    signature_key = f"{key_prefix}_signature_{event_id}"
 
     if (
         st.session_state.get(signature_key) != selection_signature
@@ -2020,7 +2021,7 @@ def render_saved_calculation_comparison(
         overview_metric = st.selectbox(
             "Kennzahl für Balkenvergleich",
             list(numeric_options.keys()),
-            key=f"github_comparison_metric_{event_id}",
+            key=f"{key_prefix}_metric_{event_id}",
         )
         metric_key, converter = numeric_options[overview_metric]
         bar_rows = []
@@ -2052,7 +2053,7 @@ def render_saved_calculation_comparison(
         series_name = st.selectbox(
             "Zeitreihe auswählen",
             list(COMPARISON_SERIES.keys()),
-            key=f"github_comparison_series_{event_id}",
+            key=f"{key_prefix}_series_{event_id}",
         )
         series_definition = COMPARISON_SERIES[series_name]
 
@@ -2115,7 +2116,7 @@ def render_saved_calculation_comparison(
             st.plotly_chart(
                 figure,
                 use_container_width=True,
-                key=f"github_comparison_chart_{event_id}_{series_name}",
+                key=f"{key_prefix}_chart_{event_id}_{series_name}",
             )
         else:
             st.info(
@@ -2128,7 +2129,7 @@ def render_saved_calculation_comparison(
         reference_name = st.selectbox(
             "Referenzberechnung",
             [item["name"] for item in selected_results],
-            key=f"github_comparison_reference_{event_id}",
+            key=f"{key_prefix}_reference_{event_id}",
         )
         reference = next(
             item for item in selected_results
@@ -3157,6 +3158,7 @@ def render_analysis_area() -> None:
             event_id,
             calculations,
             show_series_section=False,
+            key_prefix="analysis_overview",
         )
 
     with analysis_tabs[1]:
@@ -3166,6 +3168,7 @@ def render_analysis_area() -> None:
             calculations,
             show_summary_section=False,
             show_difference_section=False,
+            key_prefix="analysis_diagrams",
         )
 
     with analysis_tabs[2]:
