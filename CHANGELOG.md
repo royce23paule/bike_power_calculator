@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.7.1
+- Neue Hauptnavigation mit Rechner, Analyse und Datenbank
+- Vergleich aus der Datenbankverwaltung in den eigenständigen Analysebereich verschoben
+- Analyse nutzt die volle Seitenbreite statt der schmalen Sidebar
+- Datenbankbereich enthält nur noch Verwaltung: Events, Dateien, Berechnungen und Backup
+- Analysebereich mit Tabs für Übersicht, Diagramme, Karte und Tabellen
+- Vergleichs-Engine modularisiert und abschnittsweise wiederverwendbar
+- Karten- und Tabellenvergleich für Version 3.7.2 vorbereitet
+- Rechner und bestehende Ergebnisansicht bleiben unverändert nutzbar
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.7.0
 - Neuer Tab „Vergleich“ für gespeicherte Berechnungen eines Events
 - Zwei bis acht vollständige Berechnungen gleichzeitig auswählbar

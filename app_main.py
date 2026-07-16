@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.7.0"
+APP_VERSION = "3.7.1"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -1879,6 +1879,10 @@ def render_saved_calculation_comparison(
     db,
     event_id: str,
     calculations: list[dict[str, Any]],
+    *,
+    show_summary_section: bool = True,
+    show_series_section: bool = True,
+    show_difference_section: bool = True,
 ) -> None:
     valid_calculations = [
         item for item in calculations
@@ -1959,241 +1963,244 @@ def render_saved_calculation_comparison(
     if len(selected_results) < 2:
         return
 
-    st.markdown("### Kennzahlenvergleich")
-    summary_df = build_comparison_summary(selected_results)
+    if show_summary_section:
+        st.markdown("### Kennzahlenvergleich")
+        summary_df = build_comparison_summary(selected_results)
 
-    display_columns = [
-        "Berechnung",
-        "Zeit",
-        "Distanz [km]",
-        "Ø Geschwindigkeit [km/h]",
-        "AP [W]",
-        "NP [W]",
-        "CdA [m²]",
-        "Höhenmeter [m]",
-        "Wettermodell",
-    ]
-    available_columns = [
-        column for column in display_columns
-        if column in summary_df.columns
-    ]
-    st.dataframe(
-        summary_df[available_columns],
-        use_container_width=True,
-        hide_index=True,
-    )
-    st.download_button(
-        "Vergleichstabelle als CSV herunterladen",
-        data=summary_df.to_csv(index=False).encode("utf-8"),
-        file_name="berechnungsvergleich.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
-
-    numeric_options = {
-        "Fahrzeit [min]": (
-            "duration_s",
-            lambda value: float(value) / 60.0,
-        ),
-        "Ø Geschwindigkeit [km/h]": (
-            "average_speed_kmh",
-            float,
-        ),
-        "Average Power [W]": (
-            "average_power_w",
-            float,
-        ),
-        "Normalized Power [W]": (
-            "normalized_power_w",
-            float,
-        ),
-        "CdA [m²]": (
-            "calibration_cda",
-            float,
-        ),
-    }
-    overview_metric = st.selectbox(
-        "Kennzahl für Balkenvergleich",
-        list(numeric_options.keys()),
-        key=f"github_comparison_metric_{event_id}",
-    )
-    metric_key, converter = numeric_options[overview_metric]
-    bar_rows = []
-    for item in selected_results:
-        result = item["result"]
-        value = result.get(metric_key)
-        if value is None and metric_key == "average_power_w":
-            value = result.get("calibration_ap")
-        if value is None and metric_key == "normalized_power_w":
-            value = result.get("calibration_np")
-        if value is None:
-            continue
-        try:
-            value = converter(value)
-        except Exception:
-            continue
-        bar_rows.append(
-            {
-                "Berechnung": item["name"],
-                overview_metric: value,
-            }
-        )
-    if bar_rows:
-        bar_df = pd.DataFrame(bar_rows).set_index("Berechnung")
-        st.bar_chart(bar_df)
-
-    st.markdown("### Gemeinsame Verlaufskurven")
-    series_name = st.selectbox(
-        "Zeitreihe auswählen",
-        list(COMPARISON_SERIES.keys()),
-        key=f"github_comparison_series_{event_id}",
-    )
-    series_definition = COMPARISON_SERIES[series_name]
-
-    figure = go.Figure()
-    added = 0
-    x_title = "Strecke [km]"
-    for item in selected_results:
-        values = _first_series(
-            item["result"],
-            series_definition["keys"],
-        )
-        if values is None:
-            continue
-
-        y_values = np.asarray(values, dtype=float)
-        x_values, current_x_title = _comparison_distance_axis(
-            item["result"],
-            len(y_values),
-        )
-        x_title = current_x_title
-
-        valid = np.isfinite(x_values) & np.isfinite(y_values)
-        if not np.any(valid):
-            continue
-
-        max_points = 2500
-        valid_x = x_values[valid]
-        valid_y = y_values[valid]
-        if valid_x.size > max_points:
-            indices = np.linspace(
-                0,
-                valid_x.size - 1,
-                max_points,
-            ).astype(int)
-            valid_x = valid_x[indices]
-            valid_y = valid_y[indices]
-
-        figure.add_trace(
-            go.Scatter(
-                x=valid_x,
-                y=valid_y,
-                mode="lines",
-                name=item["name"],
-                hovertemplate=(
-                    "%{x:.2f}<br>%{y:.2f}<extra>%{fullData.name}</extra>"
-                ),
-            )
-        )
-        added += 1
-
-    if added:
-        figure.update_layout(
-            xaxis_title=x_title,
-            yaxis_title=series_definition["y_title"],
-            legend_title="Berechnung",
-            hovermode="x unified",
-            height=560,
-            margin=dict(l=20, r=20, t=30, b=20),
-        )
-        st.plotly_chart(
-            figure,
+        display_columns = [
+            "Berechnung",
+            "Zeit",
+            "Distanz [km]",
+            "Ø Geschwindigkeit [km/h]",
+            "AP [W]",
+            "NP [W]",
+            "CdA [m²]",
+            "Höhenmeter [m]",
+            "Wettermodell",
+        ]
+        available_columns = [
+            column for column in display_columns
+            if column in summary_df.columns
+        ]
+        st.dataframe(
+            summary_df[available_columns],
             use_container_width=True,
-            key=f"github_comparison_chart_{event_id}_{series_name}",
+            hide_index=True,
         )
-    else:
-        st.info(
-            f"Für „{series_name}“ sind in den ausgewählten Berechnungen "
-            "keine vergleichbaren Zeitreihen gespeichert."
+        st.download_button(
+            "Vergleichstabelle als CSV herunterladen",
+            data=summary_df.to_csv(index=False).encode("utf-8"),
+            file_name="berechnungsvergleich.csv",
+            mime="text/csv",
+            use_container_width=True,
         )
 
-    st.markdown("### Differenzen zur Referenz")
-    reference_name = st.selectbox(
-        "Referenzberechnung",
-        [item["name"] for item in selected_results],
-        key=f"github_comparison_reference_{event_id}",
-    )
-    reference = next(
-        item for item in selected_results
-        if item["name"] == reference_name
-    )
-    reference_result = reference["result"]
-    difference_rows = []
-    for item in selected_results:
-        result = item["result"]
-        duration_delta = None
-        speed_delta = None
-        ap_delta = None
-        np_delta = None
-
-        if (
-            result.get("duration_s") is not None
-            and reference_result.get("duration_s") is not None
-        ):
-            duration_delta = (
-                float(result["duration_s"])
-                - float(reference_result["duration_s"])
+        numeric_options = {
+            "Fahrzeit [min]": (
+                "duration_s",
+                lambda value: float(value) / 60.0,
+            ),
+            "Ø Geschwindigkeit [km/h]": (
+                "average_speed_kmh",
+                float,
+            ),
+            "Average Power [W]": (
+                "average_power_w",
+                float,
+            ),
+            "Normalized Power [W]": (
+                "normalized_power_w",
+                float,
+            ),
+            "CdA [m²]": (
+                "calibration_cda",
+                float,
+            ),
+        }
+        overview_metric = st.selectbox(
+            "Kennzahl für Balkenvergleich",
+            list(numeric_options.keys()),
+            key=f"github_comparison_metric_{event_id}",
+        )
+        metric_key, converter = numeric_options[overview_metric]
+        bar_rows = []
+        for item in selected_results:
+            result = item["result"]
+            value = result.get(metric_key)
+            if value is None and metric_key == "average_power_w":
+                value = result.get("calibration_ap")
+            if value is None and metric_key == "normalized_power_w":
+                value = result.get("calibration_np")
+            if value is None:
+                continue
+            try:
+                value = converter(value)
+            except Exception:
+                continue
+            bar_rows.append(
+                {
+                    "Berechnung": item["name"],
+                    overview_metric: value,
+                }
             )
-        if (
-            result.get("average_speed_kmh") is not None
-            and reference_result.get("average_speed_kmh") is not None
-        ):
-            speed_delta = (
-                float(result["average_speed_kmh"])
-                - float(reference_result["average_speed_kmh"])
+        if bar_rows:
+            bar_df = pd.DataFrame(bar_rows).set_index("Berechnung")
+            st.bar_chart(bar_df)
+
+    if show_series_section:
+        st.markdown("### Gemeinsame Verlaufskurven")
+        series_name = st.selectbox(
+            "Zeitreihe auswählen",
+            list(COMPARISON_SERIES.keys()),
+            key=f"github_comparison_series_{event_id}",
+        )
+        series_definition = COMPARISON_SERIES[series_name]
+
+        figure = go.Figure()
+        added = 0
+        x_title = "Strecke [km]"
+        for item in selected_results:
+            values = _first_series(
+                item["result"],
+                series_definition["keys"],
+            )
+            if values is None:
+                continue
+
+            y_values = np.asarray(values, dtype=float)
+            x_values, current_x_title = _comparison_distance_axis(
+                item["result"],
+                len(y_values),
+            )
+            x_title = current_x_title
+
+            valid = np.isfinite(x_values) & np.isfinite(y_values)
+            if not np.any(valid):
+                continue
+
+            max_points = 2500
+            valid_x = x_values[valid]
+            valid_y = y_values[valid]
+            if valid_x.size > max_points:
+                indices = np.linspace(
+                    0,
+                    valid_x.size - 1,
+                    max_points,
+                ).astype(int)
+                valid_x = valid_x[indices]
+                valid_y = valid_y[indices]
+
+            figure.add_trace(
+                go.Scatter(
+                    x=valid_x,
+                    y=valid_y,
+                    mode="lines",
+                    name=item["name"],
+                    hovertemplate=(
+                        "%{x:.2f}<br>%{y:.2f}<extra>%{fullData.name}</extra>"
+                    ),
+                )
+            )
+            added += 1
+
+        if added:
+            figure.update_layout(
+                xaxis_title=x_title,
+                yaxis_title=series_definition["y_title"],
+                legend_title="Berechnung",
+                hovermode="x unified",
+                height=560,
+                margin=dict(l=20, r=20, t=30, b=20),
+            )
+            st.plotly_chart(
+                figure,
+                use_container_width=True,
+                key=f"github_comparison_chart_{event_id}_{series_name}",
+            )
+        else:
+            st.info(
+                f"Für „{series_name}“ sind in den ausgewählten Berechnungen "
+                "keine vergleichbaren Zeitreihen gespeichert."
             )
 
-        result_ap = _comparison_metric_value(
-            result,
-            "average_power_w",
-            "calibration_ap",
+    if show_difference_section:
+        st.markdown("### Differenzen zur Referenz")
+        reference_name = st.selectbox(
+            "Referenzberechnung",
+            [item["name"] for item in selected_results],
+            key=f"github_comparison_reference_{event_id}",
         )
-        reference_ap = _comparison_metric_value(
-            reference_result,
-            "average_power_w",
-            "calibration_ap",
+        reference = next(
+            item for item in selected_results
+            if item["name"] == reference_name
         )
-        if result_ap is not None and reference_ap is not None:
-            ap_delta = float(result_ap) - float(reference_ap)
+        reference_result = reference["result"]
+        difference_rows = []
+        for item in selected_results:
+            result = item["result"]
+            duration_delta = None
+            speed_delta = None
+            ap_delta = None
+            np_delta = None
 
-        result_np = _comparison_metric_value(
-            result,
-            "normalized_power_w",
-            "calibration_np",
-        )
-        reference_np = _comparison_metric_value(
-            reference_result,
-            "normalized_power_w",
-            "calibration_np",
-        )
-        if result_np is not None and reference_np is not None:
-            np_delta = float(result_np) - float(reference_np)
+            if (
+                result.get("duration_s") is not None
+                and reference_result.get("duration_s") is not None
+            ):
+                duration_delta = (
+                    float(result["duration_s"])
+                    - float(reference_result["duration_s"])
+                )
+            if (
+                result.get("average_speed_kmh") is not None
+                and reference_result.get("average_speed_kmh") is not None
+            ):
+                speed_delta = (
+                    float(result["average_speed_kmh"])
+                    - float(reference_result["average_speed_kmh"])
+                )
 
-        difference_rows.append(
-            {
-                "Berechnung": item["name"],
-                "Δ Zeit [s]": duration_delta,
-                "Δ Geschwindigkeit [km/h]": speed_delta,
-                "Δ AP [W]": ap_delta,
-                "Δ NP [W]": np_delta,
-            }
-        )
+            result_ap = _comparison_metric_value(
+                result,
+                "average_power_w",
+                "calibration_ap",
+            )
+            reference_ap = _comparison_metric_value(
+                reference_result,
+                "average_power_w",
+                "calibration_ap",
+            )
+            if result_ap is not None and reference_ap is not None:
+                ap_delta = float(result_ap) - float(reference_ap)
 
-    st.dataframe(
-        pd.DataFrame(difference_rows),
-        use_container_width=True,
-        hide_index=True,
-    )
+            result_np = _comparison_metric_value(
+                result,
+                "normalized_power_w",
+                "calibration_np",
+            )
+            reference_np = _comparison_metric_value(
+                reference_result,
+                "normalized_power_w",
+                "calibration_np",
+            )
+            if result_np is not None and reference_np is not None:
+                np_delta = float(result_np) - float(reference_np)
+
+            difference_rows.append(
+                {
+                    "Berechnung": item["name"],
+                    "Δ Zeit [s]": duration_delta,
+                    "Δ Geschwindigkeit [km/h]": speed_delta,
+                    "Δ AP [W]": ap_delta,
+                    "Δ NP [W]": np_delta,
+                }
+            )
+
+        st.dataframe(
+            pd.DataFrame(difference_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 def render_github_database_sidebar() -> None:
@@ -2272,7 +2279,7 @@ root_path = "Database"
         st.error(str(exc))
         return
 
-    tabs = st.tabs(["Events", "Neu", "Bearbeiten", "Dateien", "Berechnungen", "Vergleich", "Backup"])
+    tabs = st.tabs(["Events", "Neu", "Bearbeiten", "Dateien", "Berechnungen", "Backup"])
 
     with tabs[0]:
         search = st.text_input("Suchen", key="github_database_search").strip().lower()
@@ -2996,27 +3003,6 @@ root_path = "Database"
 
 
     with tabs[5]:
-        selected_id = st.session_state.get(
-            "github_database_selected_event"
-        )
-        if not selected_id:
-            st.info("Zuerst im Tab „Events“ ein Event auswählen.")
-        else:
-            try:
-                comparison_event = db.load_event(selected_id)
-                comparison_calculations = db.list_calculations(selected_id)
-                st.markdown(
-                    f"**Vergleich für {comparison_event.get('name', selected_id)}**"
-                )
-                render_saved_calculation_comparison(
-                    db,
-                    selected_id,
-                    comparison_calculations,
-                )
-            except GitHubDatabaseError as exc:
-                st.error(f"Vergleich konnte nicht geöffnet werden: {exc}")
-
-    with tabs[6]:
         st.markdown("**Event-ZIP importieren**")
         backup_upload = st.file_uploader(
             "Event-Backup auswählen",
@@ -3072,13 +3058,161 @@ root_path = "Database"
             except GitHubDatabaseError as exc:
                 st.error(str(exc))
 
+
+def render_analysis_area() -> None:
+    st.title("📊 Analyse")
+    st.caption(
+        "Gespeicherte Berechnungen vergleichen. Dieser Bereich bildet die "
+        "gemeinsame Grundlage für Vergleich, Parameterstudien und Pacing."
+    )
+
+    db = get_github_database()
+    if db is None:
+        st.warning(
+            "Die GitHub-Datenbank ist nicht konfiguriert. "
+            "Bitte zuerst den Bereich „Datenbank“ einrichten."
+        )
+        return
+
+    try:
+        events = db.list_events()
+    except GitHubDatabaseError as exc:
+        st.error(f"Events konnten nicht geladen werden: {exc}")
+        return
+
+    if not events:
+        st.info("In der GitHub-Datenbank sind noch keine Events vorhanden.")
+        return
+
+    event_labels: dict[str, str] = {}
+    for event in events:
+        base_label = (
+            f"{event.get('name', event.get('id'))} · "
+            f"{event.get('date') or 'ohne Datum'}"
+        )
+        label = base_label
+        if label in event_labels:
+            label = f"{base_label} · {event.get('id')}"
+        event_labels[label] = event.get("id")
+
+    current_event_id = st.session_state.get(
+        "github_database_selected_event"
+    )
+    label_list = list(event_labels.keys())
+    default_index = 0
+    if current_event_id:
+        for index, label in enumerate(label_list):
+            if event_labels[label] == current_event_id:
+                default_index = index
+                break
+
+    selected_event_label = st.selectbox(
+        "Event auswählen",
+        label_list,
+        index=default_index,
+        key="analysis_event_selection",
+    )
+    event_id = event_labels[selected_event_label]
+    st.session_state.github_database_selected_event = event_id
+
+    try:
+        event = db.load_event(event_id)
+        calculations = db.list_calculations(event_id)
+    except GitHubDatabaseError as exc:
+        st.error(f"Analysedaten konnten nicht geladen werden: {exc}")
+        return
+
+    header_cols = st.columns(4)
+    header_cols[0].metric("Event", event.get("name", event_id))
+    header_cols[1].metric(
+        "Berechnungen",
+        len(calculations),
+    )
+    header_cols[2].metric(
+        "Vollständig",
+        sum(
+            1 for item in calculations
+            if item.get("_integrity", {}).get("status") == "ok"
+        ),
+    )
+    header_cols[3].metric(
+        "Beschädigt",
+        sum(
+            1 for item in calculations
+            if item.get("_integrity", {}).get("status") != "ok"
+        ),
+    )
+
+    st.divider()
+    analysis_tabs = st.tabs(
+        ["Übersicht & Vergleich", "Diagramme", "Karte", "Tabellen"]
+    )
+
+    # In 3.7.1 use the common comparison engine in the first two tabs.
+    # Later sources (parameter studies, pacing, current result) will feed the
+    # same engine without changing its data contract.
+    with analysis_tabs[0]:
+        render_saved_calculation_comparison(
+            db,
+            event_id,
+            calculations,
+            show_series_section=False,
+        )
+
+    with analysis_tabs[1]:
+        render_saved_calculation_comparison(
+            db,
+            event_id,
+            calculations,
+            show_summary_section=False,
+            show_difference_section=False,
+        )
+
+    with analysis_tabs[2]:
+        st.info(
+            "Der gemeinsame Kartenvergleich wird in Version 3.7.2 ergänzt. "
+            "Die gespeicherten Trackdaten sind bereits Bestandteil der Ergebnisse."
+        )
+
+    with analysis_tabs[3]:
+        st.info(
+            "Gemeinsame Detailtabellen aus mehreren Berechnungen werden in "
+            "Version 3.7.2 ergänzt."
+        )
+
+
 def main() -> None:
     init_session_state()
 
+    with st.sidebar:
+        st.header("Navigation")
+        app_area = st.radio(
+            "Bereich",
+            ["🚴 Rechner", "📊 Analyse", "🗄 Datenbank"],
+            key="app_main_area",
+            label_visibility="collapsed",
+        )
+        st.caption(f"Version {APP_VERSION} · Build {BUILD_DATE}")
+
+    if app_area == "📊 Analyse":
+        render_analysis_area()
+        return
+
+    if app_area == "🗄 Datenbank":
+        st.title("🗄 GitHub-Datenbank")
+        st.caption(
+            "Events, Dateien, gespeicherte Berechnungen und Backups verwalten."
+        )
+        render_github_database_sidebar()
+        return
+
     st.title("🚴 Bike Power Calculator")
-    st.caption(f"Version {APP_VERSION} – stabiler Rechenkern mit optionalem Entwicklermodus")
+    st.caption(
+        f"Version {APP_VERSION} – stabiler Rechenkern mit optionalem Entwicklermodus"
+    )
 
     with st.sidebar:
+        st.divider()
         st.header("Einstellungen")
 
         uploaded_json = st.file_uploader(
@@ -3114,8 +3248,6 @@ def main() -> None:
             value=st.session_state.developer_mode,
             help="Zeigt Laufzeitprofile, Systeminformationen und Diagnosewerte.",
         )
-        st.caption(f"Version {APP_VERSION} · Build {BUILD_DATE}")
-        render_github_database_sidebar()
 
     config = st.session_state.config.copy()
 
