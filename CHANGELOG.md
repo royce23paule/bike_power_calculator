@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.4.2
+- Offline-Wetter-Snapshots verwenden bei fehlendem exakten Schlüssel den nächstgelegenen Wetterpunkt desselben Tages
+- Maximale räumliche Zuordnungstoleranz: 2,0 km
+- Distanzberechnung mit Haversine-Formel
+- Robust gegenüber leicht abweichenden GPX-Stützpunkten zwischen zwei Berechnungen
+- Fehlermeldung nennt die Entfernung zum nächsten vorhandenen Snapshot-Punkt
+- Keine Änderung der Berechnungsphysik außerhalb der Wetterpunkt-Zuordnung
+
+
 ## 3.4.1
 - Behoben: `_weather_request_key` war versehentlich auskommentiert
 - Online-Wetterberechnungen und Wetter-Snapshots funktionieren wieder

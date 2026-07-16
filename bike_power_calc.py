@@ -41,6 +41,7 @@ import os
 import csv
 from pathlib import Path
 import json
+import math
 import hashlib
 import tempfile
 from matplotlib.collections import LineCollection
@@ -379,17 +380,86 @@ def get_weather_snapshot():
 #     API_Data = mgr.get_data() # Download data
 # #    print(API_Data)
 
+
+def _haversine_distance_km(lat1, lon1, lat2, lon2):
+    radius_km = 6371.0088
+    phi1 = math.radians(float(lat1))
+    phi2 = math.radians(float(lat2))
+    delta_phi = math.radians(float(lat2) - float(lat1))
+    delta_lambda = math.radians(float(lon2) - float(lon1))
+    a = (
+        math.sin(delta_phi / 2.0) ** 2
+        + math.cos(phi1)
+        * math.cos(phi2)
+        * math.sin(delta_lambda / 2.0) ** 2
+    )
+    return 2.0 * radius_km * math.asin(min(1.0, math.sqrt(a)))
+
+
+def _find_nearest_weather_snapshot(latitude, longitude, start_time, max_distance_km=2.0):
+    target_date = str(start_time)[:10]
+    nearest = None
+    nearest_distance = None
+
+    for item in _weather_snapshot_requests:
+        item_date = str(item.get("requested_start_time", ""))[:10]
+        if not item_date:
+            dates = item.get("date") or []
+            item_date = str(dates[0])[:10] if dates else ""
+
+        if item_date != target_date:
+            continue
+
+        try:
+            distance_km = _haversine_distance_km(
+                latitude,
+                longitude,
+                item.get("latitude"),
+                item.get("longitude"),
+            )
+        except (TypeError, ValueError):
+            continue
+
+        if nearest_distance is None or distance_km < nearest_distance:
+            nearest = item
+            nearest_distance = distance_km
+
+    if nearest is None or nearest_distance is None:
+        return None, None
+    if nearest_distance > float(max_distance_km):
+        return None, nearest_distance
+    return nearest, nearest_distance
+
+
 def Get_API_Data(latitude,longitude,StratTime):
     global hourly_data, API_Cache_Hits, API_Cache_Misses, API_Request_Count
     global _weather_snapshot_requests, _weather_snapshot_lookup
     request_key = _weather_request_key(latitude, longitude, StratTime)
     if _weather_snapshot_offline:
         snapshot = _weather_snapshot_lookup.get(request_key)
+        matched_distance_km = 0.0
+
         if snapshot is None:
+            snapshot, matched_distance_km = _find_nearest_weather_snapshot(
+                latitude,
+                longitude,
+                StratTime,
+                max_distance_km=2.0,
+            )
+
+        if snapshot is None:
+            distance_note = ""
+            if matched_distance_km is not None:
+                distance_note = (
+                    f" Der nächste vorhandene Punkt liegt "
+                    f"{matched_distance_km:.2f} km entfernt."
+                )
             raise ValueError(
                 'Im geladenen Online-Wetter-Snapshot fehlen Daten für '
-                f'{float(latitude):.5f}, {float(longitude):.5f} am {StratTime[:10]}.'
+                f'{float(latitude):.5f}, {float(longitude):.5f} '
+                f'am {StratTime[:10]}.{distance_note}'
             )
+
         hourly_data = _snapshot_to_hourly_data(snapshot)
         API_Cache_Hits += 1
         _prepare_fast_weather_arrays()
