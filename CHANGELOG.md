@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.6.0
+- Event-ZIP-Backups können als neues Event mit neuer UUID importiert werden
+- ZIP-Struktur und Pfade werden vor dem Import validiert
+- Gespeicherte Berechnungen können umbenannt werden
+- Automatische Integritätsprüfung für jede Berechnung
+- Beschädigte Berechnungen werden markiert und nicht geladen
+- Repository-Statistik: Events, Berechnungen, Dateien, Speicher und größte Datei
+- Git-Push mit automatischem Wiederholungsversuch
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.5.0
 - Vollständiges Dateimanagement im GitHub-Event
 - Event-Dateien können geladen, heruntergeladen, umbenannt und bestätigt gelöscht werden

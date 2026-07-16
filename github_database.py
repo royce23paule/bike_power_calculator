@@ -405,6 +405,33 @@ class GitHubDatabase:
             )
         return completed
 
+
+    def _push_with_retry(self, cwd: str, *, max_attempts: int = 2) -> None:
+        """Push current branch; retry once after fetching/rebasing."""
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                if attempt > 1:
+                    self._run_git(
+                        ["pull", "--rebase", "origin", self.config.branch],
+                        cwd=cwd,
+                        timeout_s=180,
+                    )
+                self._run_git(
+                    ["push", "origin", f"HEAD:{self.config.branch}"],
+                    cwd=cwd,
+                    timeout_s=180,
+                )
+                return
+            except GitHubDatabaseError as exc:
+                last_error = exc
+                if attempt < max_attempts:
+                    continue
+        raise GitHubDatabaseError(
+            f"Git-Push ist auch nach {max_attempts} Versuchen fehlgeschlagen: "
+            f"{last_error}"
+        ) from last_error
+
     def put_file_via_git_push(
         self,
         path: str,
@@ -455,15 +482,7 @@ class GitHubDatabase:
 
             # Rebase once to reduce the chance of conflicts when another API
             # operation updated index.json shortly before this upload.
-            self._run_git(
-                ["pull", "--rebase", "origin", self.config.branch],
-                cwd=temp_dir,
-            )
-            self._run_git(
-                ["push", "origin", f"HEAD:{self.config.branch}"],
-                cwd=temp_dir,
-                timeout_s=180,
-            )
+            self._push_with_retry(temp_dir)
 
     def get_file_raw(self, path: str) -> bytes | None:
         """Loads repository content using GitHub's raw media type."""
@@ -839,15 +858,7 @@ class GitHubDatabase:
                 ],
                 cwd=temp_dir,
             )
-            self._run_git(
-                ["pull", "--rebase", "origin", self.config.branch],
-                cwd=temp_dir,
-            )
-            self._run_git(
-                ["push", "origin", f"HEAD:{self.config.branch}"],
-                cwd=temp_dir,
-                timeout_s=180,
-            )
+            self._push_with_retry(temp_dir)
 
         return new_name
 
@@ -902,6 +913,263 @@ class GitHubDatabase:
             ).strip("_") or event_id
             filename = f"{safe_event_name}_{event_id}_backup.zip"
             return filename, buffer.getvalue()
+
+
+    def inspect_event_backup(self, zip_content: bytes) -> dict[str, Any]:
+        try:
+            with zipfile.ZipFile(io.BytesIO(zip_content), "r") as archive:
+                files = [n for n in archive.namelist() if n and not n.endswith("/")]
+                if not files:
+                    raise GitHubDatabaseError("Das ZIP enthält keine Dateien.")
+                for name in files:
+                    path = Path(name)
+                    if path.is_absolute() or ".." in path.parts:
+                        raise GitHubDatabaseError(f"Unsicherer ZIP-Pfad: {name}")
+                candidates = [n for n in files if Path(n).name == "event.json"]
+                if len(candidates) != 1:
+                    raise GitHubDatabaseError(
+                        "Das ZIP muss genau eine event.json enthalten."
+                    )
+                event_path = candidates[0]
+                event = json.loads(archive.read(event_path).decode("utf-8-sig"))
+                prefix = str(Path(event_path).parent).replace("\\", "/")
+                calc_count = sum(
+                    1 for n in files
+                    if "/calculations/" in f"/{n}"
+                    and Path(n).name == "calculation.json"
+                )
+                return {
+                    "event": event,
+                    "root_prefix": prefix,
+                    "file_count": len(files),
+                    "calculation_count": calc_count,
+                    "size_bytes": sum(archive.getinfo(n).file_size for n in files),
+                }
+        except zipfile.BadZipFile as exc:
+            raise GitHubDatabaseError("Ungültiges ZIP-Archiv.") from exc
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise GitHubDatabaseError("event.json im Backup ist ungültig.") from exc
+
+    def import_event_zip(
+        self,
+        zip_content: bytes,
+        *,
+        new_name: str | None = None,
+    ) -> dict[str, Any]:
+        info = self.inspect_event_backup(zip_content)
+        source_event = dict(info["event"])
+        prefix = info["root_prefix"].strip("/")
+        event_id = uuid.uuid4().hex[:8]
+        now = datetime.now(timezone.utc).isoformat()
+        event = dict(source_event)
+        event.update({
+            "id": event_id,
+            "name": (
+                new_name.strip()
+                if new_name and new_name.strip()
+                else f"{source_event.get('name', 'Importiertes Event')} (Import)"
+            ),
+            "created_at": now,
+            "updated_at": now,
+            "imported_from_event_id": source_event.get("id"),
+        })
+
+        repo_url = f"https://github.com/{self.config.owner}/{self.config.repo}.git"
+        rel_root = Path(self.config.normalized_root) / "Events" / event_id
+        with tempfile.TemporaryDirectory(prefix="bike-power-import-") as temp_dir:
+            self._run_git(
+                ["clone", "--depth", "1", "--branch", self.config.branch,
+                 repo_url, temp_dir],
+                timeout_s=180,
+            )
+            destination = Path(temp_dir) / rel_root
+            destination.mkdir(parents=True, exist_ok=False)
+            with zipfile.ZipFile(io.BytesIO(zip_content), "r") as archive:
+                for member in archive.infolist():
+                    if member.is_dir():
+                        continue
+                    member_path = Path(member.filename)
+                    if member_path.is_absolute() or ".." in member_path.parts:
+                        raise GitHubDatabaseError(
+                            f"Unsicherer ZIP-Pfad: {member.filename}"
+                        )
+                    normalized = str(member_path).replace("\\", "/")
+                    relative = Path(
+                        normalized[len(prefix) + 1:]
+                        if prefix and normalized.startswith(prefix + "/")
+                        else normalized
+                    )
+                    target = destination / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(archive.read(member))
+            (destination / "event.json").write_text(
+                json.dumps(event, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            self._run_git(["config", "user.name", "Bike Power Calculator"], cwd=temp_dir)
+            self._run_git(
+                ["config", "user.email",
+                 "bike-power-calculator@users.noreply.github.com"],
+                cwd=temp_dir,
+            )
+            self._run_git(["add", "--", rel_root.as_posix()], cwd=temp_dir)
+            self._run_git(
+                ["commit", "-m", f"Import event: {event['name']}"],
+                cwd=temp_dir,
+            )
+            self._push_with_retry(temp_dir)
+
+        index, sha = self.load_index()
+        index["events"].append({
+            "id": event_id,
+            "name": event["name"],
+            "date": event.get("date", ""),
+            "location": event.get("location", ""),
+            "sport": event.get("sport", ""),
+            "tags": event.get("tags", []),
+            "updated_at": now,
+        })
+        index["events"].sort(
+            key=lambda x: (x.get("date") or "", x.get("name") or ""),
+            reverse=True,
+        )
+        index["updated_at"] = now
+        self.put_json(
+            self.index_path,
+            index,
+            f"Update database index: import {event['name']}",
+            sha,
+        )
+        return event
+
+    def rename_calculation(
+        self,
+        event_id: str,
+        calculation_id: str,
+        new_name: str,
+    ) -> dict[str, Any]:
+        cleaned = new_name.strip()
+        if not cleaned:
+            raise GitHubDatabaseError("Bitte einen Namen eingeben.")
+        repo_url = f"https://github.com/{self.config.owner}/{self.config.repo}.git"
+        rel = Path(self._calculation_path(
+            event_id, calculation_id, "calculation.json"
+        ))
+        with tempfile.TemporaryDirectory(prefix="bike-power-rename-calc-") as temp_dir:
+            self._run_git(
+                ["clone", "--depth", "1", "--branch", self.config.branch,
+                 repo_url, temp_dir],
+                timeout_s=180,
+            )
+            target = Path(temp_dir) / rel
+            if not target.exists():
+                raise GitHubDatabaseError("Berechnung wurde nicht gefunden.")
+            metadata = json.loads(target.read_text(encoding="utf-8-sig"))
+            old = metadata.get("name", calculation_id)
+            metadata["name"] = cleaned
+            metadata["updated_at"] = datetime.now(timezone.utc).isoformat()
+            target.write_text(
+                json.dumps(metadata, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            self._run_git(["config", "user.name", "Bike Power Calculator"], cwd=temp_dir)
+            self._run_git(
+                ["config", "user.email",
+                 "bike-power-calculator@users.noreply.github.com"],
+                cwd=temp_dir,
+            )
+            self._run_git(["add", "--", rel.as_posix()], cwd=temp_dir)
+            self._run_git(
+                ["commit", "-m", f"Rename calculation: {old} to {cleaned}"],
+                cwd=temp_dir,
+            )
+            self._push_with_retry(temp_dir)
+            return metadata
+
+    def calculation_integrity(
+        self,
+        event_id: str,
+        calculation_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        root = (
+            f"{self.config.normalized_root}/Events/{event_id}/"
+            f"calculations/{calculation_id}"
+        )
+        existing = {
+            item.get("name") for item in self.list_directory(root)
+            if item.get("type") == "file"
+        }
+        required = {"calculation.json", "result.json", "settings_snapshot.json"}
+        recommended = {"profiler.json", "run_log.txt"}
+        declared = set((metadata or {}).get("files", []))
+        missing_required = sorted(required - existing)
+        missing_declared = sorted(declared - existing)
+        return {
+            "status": "ok" if not missing_required and not missing_declared else "damaged",
+            "existing_files": sorted(existing),
+            "missing_required": missing_required,
+            "missing_recommended": sorted(recommended - existing),
+            "missing_declared": missing_declared,
+        }
+
+    def repository_statistics(self) -> dict[str, Any]:
+        repo_url = f"https://github.com/{self.config.owner}/{self.config.repo}.git"
+        root = Path(self.config.normalized_root)
+        with tempfile.TemporaryDirectory(prefix="bike-power-stats-") as temp_dir:
+            self._run_git(
+                ["clone", "--depth", "1", "--branch", self.config.branch,
+                 repo_url, temp_dir],
+                timeout_s=180,
+            )
+            db_root = Path(temp_dir) / root
+            events_root = db_root / "Events"
+            files = [p for p in db_root.rglob("*") if p.is_file()] if db_root.exists() else []
+            events = []
+            calculations = 0
+            if events_root.exists():
+                for event_dir in events_root.iterdir():
+                    if not event_dir.is_dir():
+                        continue
+                    event_files = [p for p in event_dir.rglob("*") if p.is_file()]
+                    calc_root = event_dir / "calculations"
+                    calc_count = (
+                        len([p for p in calc_root.iterdir() if p.is_dir()])
+                        if calc_root.exists() else 0
+                    )
+                    calculations += calc_count
+                    name = event_dir.name
+                    event_json = event_dir / "event.json"
+                    if event_json.exists():
+                        try:
+                            name = json.loads(
+                                event_json.read_text(encoding="utf-8-sig")
+                            ).get("name", name)
+                        except Exception:
+                            pass
+                    events.append({
+                        "id": event_dir.name,
+                        "name": name,
+                        "file_count": len(event_files),
+                        "calculation_count": calc_count,
+                        "size_bytes": sum(p.stat().st_size for p in event_files),
+                    })
+            largest = max(files, key=lambda p: p.stat().st_size) if files else None
+            events.sort(key=lambda x: x["size_bytes"], reverse=True)
+            return {
+                "event_count": len(events),
+                "calculation_count": calculations,
+                "file_count": len(files),
+                "size_bytes": sum(p.stat().st_size for p in files),
+                "largest_file": (
+                    {
+                        "name": largest.name,
+                        "path": largest.relative_to(db_root).as_posix(),
+                        "size_bytes": largest.stat().st_size,
+                    } if largest else None
+                ),
+                "events": events,
+            }
 
     def update_event(
         self,
@@ -1193,15 +1461,7 @@ class GitHubDatabase:
                 ],
                 cwd=temp_dir,
             )
-            self._run_git(
-                ["pull", "--rebase", "origin", self.config.branch],
-                cwd=temp_dir,
-            )
-            self._run_git(
-                ["push", "origin", f"HEAD:{self.config.branch}"],
-                cwd=temp_dir,
-                timeout_s=180,
-            )
+            self._push_with_retry(temp_dir)
 
         return metadata
 
@@ -1369,39 +1629,40 @@ class GitHubDatabase:
                 ],
                 cwd=temp_dir,
             )
-            self._run_git(
-                ["pull", "--rebase", "origin", self.config.branch],
-                cwd=temp_dir,
-            )
-            self._run_git(
-                ["push", "origin", f"HEAD:{self.config.branch}"],
-                cwd=temp_dir,
-                timeout_s=180,
-            )
+            self._push_with_retry(temp_dir)
 
     def list_calculations(self, event_id: str) -> list[dict[str, Any]]:
-        root = (
-            f"{self.config.normalized_root}/Events/{event_id}/calculations"
-        )
-        directories = self.list_directory(root)
+        root = f"{self.config.normalized_root}/Events/{event_id}/calculations"
         calculations = []
-        for directory in directories:
+        for directory in self.list_directory(root):
             if directory.get("type") != "dir":
                 continue
-            metadata_path = f"{directory.get('path')}/calculation.json"
-            content = self.get_file_raw(metadata_path)
-            if content is None:
-                continue
-            try:
-                metadata = json.loads(content.decode("utf-8-sig"))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                continue
+            calc_id = directory.get("name")
+            content = self.get_file_raw(
+                f"{directory.get('path')}/calculation.json"
+            )
+            metadata = None
+            metadata_error = None
+            if content is not None:
+                try:
+                    metadata = json.loads(content.decode("utf-8-sig"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    metadata_error = str(exc)
+            if not isinstance(metadata, dict):
+                metadata = {
+                    "id": calc_id,
+                    "event_id": event_id,
+                    "name": f"Beschädigte Berechnung {calc_id}",
+                    "created_at": "",
+                    "summary": {},
+                }
+            integrity = self.calculation_integrity(event_id, calc_id, metadata)
+            if metadata_error:
+                integrity["status"] = "damaged"
+                integrity["metadata_error"] = metadata_error
+            metadata["_integrity"] = integrity
             calculations.append(metadata)
-
-        calculations.sort(
-            key=lambda item: item.get("created_at", ""),
-            reverse=True,
-        )
+        calculations.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return calculations
 
     def find_events_by_name(self, name: str) -> list[dict[str, Any]]:

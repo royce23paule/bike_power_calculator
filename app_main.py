@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.5.0"
+APP_VERSION = "3.6.0"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -1758,6 +1758,34 @@ root_path = "Database"
     config = db.config
     st.caption(f"{config.owner}/{config.repo} · Branch {config.branch}")
 
+    if st.button(
+        "Repository-Statistik aktualisieren",
+        key="github_db_statistics_refresh",
+        use_container_width=True,
+    ):
+        try:
+            with st.spinner("Repository wird analysiert …"):
+                st.session_state.github_repository_statistics = db.repository_statistics()
+        except GitHubDatabaseError as exc:
+            st.error(f"Statistik konnte nicht erstellt werden: {exc}")
+
+    repository_stats = st.session_state.get("github_repository_statistics")
+    if repository_stats:
+        cols = st.columns(2)
+        cols[0].metric("Events", repository_stats.get("event_count", 0))
+        cols[1].metric("Berechnungen", repository_stats.get("calculation_count", 0))
+        cols[0].metric("Dateien", repository_stats.get("file_count", 0))
+        cols[1].metric(
+            "Speicher",
+            f"{repository_stats.get('size_bytes', 0) / (1024 ** 2):.2f} MB",
+        )
+        largest = repository_stats.get("largest_file")
+        if largest:
+            st.caption(
+                f"Größte Datei: {largest.get('path')} · "
+                f"{largest.get('size_bytes', 0) / (1024 ** 2):.2f} MB"
+            )
+
     connection_col, init_col = st.columns(2)
     if connection_col.button("Verbindung testen", key="github_db_test", use_container_width=True):
         try:
@@ -1783,7 +1811,7 @@ root_path = "Database"
         st.error(str(exc))
         return
 
-    tabs = st.tabs(["Events", "Neu", "Bearbeiten", "Dateien", "Berechnungen"])
+    tabs = st.tabs(["Events", "Neu", "Bearbeiten", "Dateien", "Berechnungen", "Backup"])
 
     with tabs[0]:
         search = st.text_input("Suchen", key="github_database_search").strip().lower()
@@ -2267,6 +2295,24 @@ root_path = "Database"
                     if item.get("id") == calculation_id
                 )
 
+                integrity = metadata.get("_integrity", {})
+                if integrity.get("status") == "ok":
+                    st.success("Integritätsprüfung: vollständig")
+                else:
+                    missing = sorted(set(
+                        integrity.get("missing_required", [])
+                        + integrity.get("missing_declared", [])
+                    ))
+                    st.error(
+                        "Integritätsprüfung: beschädigt oder unvollständig"
+                        + (f" · fehlt: {', '.join(missing)}" if missing else "")
+                    )
+                if integrity.get("missing_recommended"):
+                    st.warning(
+                        "Optionale Dateien fehlen: "
+                        + ", ".join(integrity["missing_recommended"])
+                    )
+
                 summary = metadata.get("summary", {})
                 summary_cols = st.columns(2)
                 summary_cols[0].metric(
@@ -2291,11 +2337,13 @@ root_path = "Database"
                 if summary.get("cda") is not None:
                     st.metric("CdA", f"{float(summary['cda']):.5f}")
 
+                calculation_damaged = integrity.get("status") != "ok"
                 action_cols = st.columns(3)
 
                 if action_cols[0].button(
                     "Ergebnisse laden",
                     key=f"github_load_results_{calculation_id}",
+                    disabled=calculation_damaged,
                     use_container_width=True,
                 ):
                     try:
@@ -2325,6 +2373,7 @@ root_path = "Database"
                 if action_cols[1].button(
                     "Einstellungen laden",
                     key=f"github_load_calc_settings_{calculation_id}",
+                    disabled=calculation_damaged,
                     use_container_width=True,
                 ):
                     try:
@@ -2345,6 +2394,7 @@ root_path = "Database"
                     "Alles laden",
                     key=f"github_load_all_{calculation_id}",
                     type="primary",
+                    disabled=calculation_damaged,
                     use_container_width=True,
                 ):
                     try:
@@ -2410,6 +2460,30 @@ root_path = "Database"
                         st.error(f"Berechnung konnte nicht geladen werden: {exc}")
 
                 st.divider()
+                st.markdown("**Berechnung umbenennen**")
+                renamed_calculation_name = st.text_input(
+                    "Neuer Name",
+                    value=metadata.get("name", ""),
+                    key=f"github_rename_calc_name_{calculation_id}",
+                )
+                if st.button(
+                    "Berechnungsnamen speichern",
+                    key=f"github_rename_calc_{calculation_id}",
+                    use_container_width=True,
+                ):
+                    try:
+                        with st.spinner("Berechnung wird umbenannt …"):
+                            db.rename_calculation(
+                                selected_id,
+                                calculation_id,
+                                renamed_calculation_name,
+                            )
+                        st.success("Berechnung wurde umbenannt.")
+                        st.rerun()
+                    except GitHubDatabaseError as exc:
+                        st.error(f"Umbenennen fehlgeschlagen: {exc}")
+
+                st.divider()
                 confirm_delete = st.checkbox(
                     "Löschen bestätigen",
                     key=f"github_confirm_delete_calc_{calculation_id}",
@@ -2437,6 +2511,61 @@ root_path = "Database"
 
                 with st.expander("Metadaten anzeigen", expanded=False):
                     st.json(metadata)
+
+    with tabs[5]:
+        st.markdown("**Event-ZIP importieren**")
+        backup_upload = st.file_uploader(
+            "Event-Backup auswählen",
+            type=["zip"],
+            key="github_event_backup_import",
+        )
+        if backup_upload is None:
+            st.info(
+                "Ein von der App exportiertes Event-ZIP auswählen. "
+                "Der Import erzeugt immer ein neues Event mit neuer UUID."
+            )
+        else:
+            backup_bytes = backup_upload.getvalue()
+            try:
+                inspection = db.inspect_event_backup(backup_bytes)
+                source_event = inspection.get("event", {})
+                st.success("Gültiges Event-Backup erkannt.")
+                st.caption(
+                    f"Quelle: {source_event.get('name', '—')} · "
+                    f"Dateien: {inspection.get('file_count', 0)} · "
+                    f"Berechnungen: {inspection.get('calculation_count', 0)} · "
+                    f"Größe: {inspection.get('size_bytes', 0) / (1024 ** 2):.2f} MB"
+                )
+                import_name = st.text_input(
+                    "Name des importierten Events",
+                    value=f"{source_event.get('name', 'Importiertes Event')} (Import)",
+                    key="github_import_event_name",
+                )
+                confirm_import = st.checkbox(
+                    "Import bestätigen",
+                    key="github_confirm_event_import",
+                )
+                if st.button(
+                    "Event jetzt importieren",
+                    key="github_import_event_zip",
+                    type="primary",
+                    disabled=not confirm_import,
+                    use_container_width=True,
+                ):
+                    try:
+                        with st.spinner("Event wird importiert …"):
+                            imported = db.import_event_zip(
+                                backup_bytes,
+                                new_name=import_name,
+                            )
+                        st.session_state.github_database_selected_event = imported["id"]
+                        st.session_state.pop("github_repository_statistics", None)
+                        st.success(f"Event „{imported['name']}“ wurde importiert.")
+                        st.rerun()
+                    except GitHubDatabaseError as exc:
+                        st.error(f"Import fehlgeschlagen: {exc}")
+            except GitHubDatabaseError as exc:
+                st.error(str(exc))
 
 def main() -> None:
     init_session_state()
