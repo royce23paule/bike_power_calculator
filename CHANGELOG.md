@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.7.3
+- Analysebereich als kompaktes Dashboard neu aufgebaut
+- Berechnungsauswahl wird nur noch einmal gerendert und geladen
+- KPI-Karten für Zeit, Geschwindigkeit, AP, NP, CdA und Höhenmeter
+- Ein zentrales großes Plotly-Diagramm mit frei wählbarer Zeitreihe
+- Differenztabelle gegenüber frei wählbarer Referenzberechnung
+- Vollständige Vergleichstabelle in einklappbarem Bereich
+- Gemeinsamer Analyse-Datensatz wird von allen Komponenten wiederverwendet
+- Doppelte API-Aufrufe und doppelte Widgets im Analysebereich entfernt
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.7.2
 - Behebt StreamlitDuplicateElementKey im Analysebereich
 - Jede Instanz der Vergleichs-Engine verwendet jetzt einen eigenen Key-Präfix

@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.7.2"
+APP_VERSION = "3.7.3"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -3060,11 +3060,320 @@ root_path = "Database"
                 st.error(str(exc))
 
 
+
+def load_analysis_results(
+    db,
+    event_id: str,
+    calculations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    valid = [
+        item for item in calculations
+        if item.get("_integrity", {}).get("status") == "ok"
+    ]
+    if len(valid) < 2:
+        st.info(
+            "Für die Analyse werden mindestens zwei vollständige "
+            "gespeicherte Berechnungen benötigt."
+        )
+        return []
+
+    label_to_id: dict[str, str] = {}
+    metadata_by_id: dict[str, dict[str, Any]] = {}
+    for item in valid:
+        calculation_id = item.get("id")
+        label = (
+            f"{item.get('name', calculation_id)} · "
+            f"{str(item.get('created_at', ''))[:16].replace('T', ' ')}"
+        )
+        if label in label_to_id:
+            label = f"{label} · {calculation_id}"
+        label_to_id[label] = calculation_id
+        metadata_by_id[calculation_id] = item
+
+    labels = list(label_to_id.keys())
+    selected_labels = st.multiselect(
+        "Berechnungen vergleichen",
+        options=labels,
+        default=labels[: min(3, len(labels))],
+        key=f"analysis_dashboard_selection_{event_id}",
+        help="Mindestens zwei, maximal acht Berechnungen auswählen.",
+    )
+
+    if len(selected_labels) < 2:
+        st.info("Bitte mindestens zwei Berechnungen auswählen.")
+        return []
+    if len(selected_labels) > 8:
+        st.warning("Es werden maximal acht Berechnungen dargestellt.")
+        selected_labels = selected_labels[:8]
+
+    signature = "|".join(label_to_id[label] for label in selected_labels)
+    cache_key = f"analysis_dashboard_results_{event_id}"
+    signature_key = f"analysis_dashboard_signature_{event_id}"
+
+    if (
+        st.session_state.get(signature_key) != signature
+        or cache_key not in st.session_state
+    ):
+        loaded: list[dict[str, Any]] = []
+        try:
+            with st.spinner("Berechnungen werden geladen …"):
+                for label in selected_labels:
+                    calculation_id = label_to_id[label]
+                    result = db.load_calculation_json(
+                        event_id,
+                        calculation_id,
+                        "result.json",
+                    )
+                    loaded.append(
+                        {
+                            "id": calculation_id,
+                            "name": metadata_by_id[calculation_id].get(
+                                "name",
+                                calculation_id,
+                            ),
+                            "metadata": metadata_by_id[calculation_id],
+                            "result": result,
+                        }
+                    )
+            st.session_state[cache_key] = loaded
+            st.session_state[signature_key] = signature
+        except GitHubDatabaseError as exc:
+            st.error(f"Berechnungen konnten nicht geladen werden: {exc}")
+            return []
+
+    return st.session_state.get(cache_key, [])
+
+
+def render_analysis_kpi_cards(
+    selected_results: list[dict[str, Any]],
+) -> None:
+    st.markdown("### Kennzahlen")
+
+    metrics = [
+        (
+            "Zeit",
+            lambda r: format_duration(r.get("duration_s")),
+        ),
+        (
+            "Ø Geschwindigkeit",
+            lambda r: (
+                "—"
+                if _comparison_metric_value(
+                    r,
+                    "average_speed_kmh",
+                    "calibration_speed_kmh",
+                ) is None
+                else f"{float(_comparison_metric_value(r, 'average_speed_kmh', 'calibration_speed_kmh')):.2f} km/h"
+            ),
+        ),
+        (
+            "Average Power",
+            lambda r: (
+                "—"
+                if _comparison_metric_value(
+                    r,
+                    "average_power_w",
+                    "calibration_ap",
+                ) is None
+                else f"{float(_comparison_metric_value(r, 'average_power_w', 'calibration_ap')):.1f} W"
+            ),
+        ),
+        (
+            "Normalized Power",
+            lambda r: (
+                "—"
+                if _comparison_metric_value(
+                    r,
+                    "normalized_power_w",
+                    "calibration_np",
+                ) is None
+                else f"{float(_comparison_metric_value(r, 'normalized_power_w', 'calibration_np')):.1f} W"
+            ),
+        ),
+        (
+            "CdA",
+            lambda r: (
+                "—"
+                if r.get("calibration_cda") is None
+                else f"{float(r['calibration_cda']):.5f}"
+            ),
+        ),
+        (
+            "Höhenmeter",
+            lambda r: (
+                "—"
+                if r.get("elevation_gain_m") is None
+                else f"{float(r['elevation_gain_m']):.0f} m"
+            ),
+        ),
+    ]
+
+    for metric_name, formatter in metrics:
+        st.caption(metric_name)
+        columns = st.columns(len(selected_results))
+        for column, item in zip(columns, selected_results):
+            with column:
+                st.metric(
+                    item["name"],
+                    formatter(item["result"]),
+                )
+
+
+def render_analysis_main_chart(
+    selected_results: list[dict[str, Any]],
+    event_id: str,
+) -> None:
+    st.markdown("### Verlauf")
+
+    series_name = st.selectbox(
+        "Diagramm",
+        list(COMPARISON_SERIES.keys()),
+        key=f"analysis_dashboard_series_{event_id}",
+        label_visibility="collapsed",
+    )
+    definition = COMPARISON_SERIES[series_name]
+
+    figure = go.Figure()
+    x_title = "Strecke [km]"
+    trace_count = 0
+
+    for item in selected_results:
+        values = _first_series(
+            item["result"],
+            definition["keys"],
+        )
+        if values is None:
+            continue
+
+        y_values = np.asarray(values, dtype=float)
+        x_values, current_x_title = _comparison_distance_axis(
+            item["result"],
+            len(y_values),
+        )
+        x_title = current_x_title
+
+        valid = np.isfinite(x_values) & np.isfinite(y_values)
+        if not np.any(valid):
+            continue
+
+        valid_x = x_values[valid]
+        valid_y = y_values[valid]
+        if valid_x.size > 3000:
+            indices = np.linspace(
+                0,
+                valid_x.size - 1,
+                3000,
+            ).astype(int)
+            valid_x = valid_x[indices]
+            valid_y = valid_y[indices]
+
+        figure.add_trace(
+            go.Scatter(
+                x=valid_x,
+                y=valid_y,
+                mode="lines",
+                name=item["name"],
+                hovertemplate=(
+                    "%{x:.2f}<br>%{y:.2f}"
+                    "<extra>%{fullData.name}</extra>"
+                ),
+            )
+        )
+        trace_count += 1
+
+    if trace_count == 0:
+        st.info(
+            f"Für „{series_name}“ sind keine vergleichbaren Daten vorhanden."
+        )
+        return
+
+    figure.update_layout(
+        height=620,
+        xaxis_title=x_title,
+        yaxis_title=definition["y_title"],
+        hovermode="x unified",
+        legend_title="Berechnung",
+        margin=dict(l=20, r=20, t=30, b=20),
+    )
+    st.plotly_chart(
+        figure,
+        use_container_width=True,
+        key=f"analysis_dashboard_chart_{event_id}_{series_name}",
+    )
+
+
+def render_analysis_differences(
+    selected_results: list[dict[str, Any]],
+    event_id: str,
+) -> None:
+    st.markdown("### Differenzen zur Referenz")
+
+    names = [item["name"] for item in selected_results]
+    reference_name = st.selectbox(
+        "Referenz",
+        names,
+        key=f"analysis_dashboard_reference_{event_id}",
+    )
+    reference = next(
+        item for item in selected_results
+        if item["name"] == reference_name
+    )
+    reference_result = reference["result"]
+
+    rows = []
+    for item in selected_results:
+        result = item["result"]
+
+        def delta(*keys: str) -> float | None:
+            current = _comparison_metric_value(result, *keys)
+            reference_value = _comparison_metric_value(
+                reference_result,
+                *keys,
+            )
+            if current is None or reference_value is None:
+                return None
+            return float(current) - float(reference_value)
+
+        rows.append(
+            {
+                "Berechnung": item["name"],
+                "Δ Zeit [s]": delta("duration_s"),
+                "Δ Geschwindigkeit [km/h]": delta(
+                    "average_speed_kmh",
+                    "calibration_speed_kmh",
+                ),
+                "Δ AP [W]": delta(
+                    "average_power_w",
+                    "calibration_ap",
+                ),
+                "Δ NP [W]": delta(
+                    "normalized_power_w",
+                    "calibration_np",
+                ),
+                "Δ CdA": delta("calibration_cda"),
+            }
+        )
+
+    difference_df = pd.DataFrame(rows)
+    st.dataframe(
+        difference_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.download_button(
+        "Differenzen als CSV herunterladen",
+        data=difference_df.to_csv(index=False).encode("utf-8"),
+        file_name="analyse_differenzen.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+
 def render_analysis_area() -> None:
     st.title("📊 Analyse")
     st.caption(
-        "Gespeicherte Berechnungen vergleichen. Dieser Bereich bildet die "
-        "gemeinsame Grundlage für Vergleich, Parameterstudien und Pacing."
+        "Vergleich gespeicherter Berechnungen. Dieselbe Oberfläche wird später "
+        "auch Parameterstudien und Pacing-Ergebnisse darstellen."
     )
 
     db = get_github_database()
@@ -3099,17 +3408,17 @@ def render_analysis_area() -> None:
     current_event_id = st.session_state.get(
         "github_database_selected_event"
     )
-    label_list = list(event_labels.keys())
+    labels = list(event_labels.keys())
     default_index = 0
     if current_event_id:
-        for index, label in enumerate(label_list):
+        for index, label in enumerate(labels):
             if event_labels[label] == current_event_id:
                 default_index = index
                 break
 
     selected_event_label = st.selectbox(
-        "Event auswählen",
-        label_list,
+        "Event",
+        labels,
         index=default_index,
         key="analysis_event_selection",
     )
@@ -3125,10 +3434,7 @@ def render_analysis_area() -> None:
 
     header_cols = st.columns(4)
     header_cols[0].metric("Event", event.get("name", event_id))
-    header_cols[1].metric(
-        "Berechnungen",
-        len(calculations),
-    )
+    header_cols[1].metric("Berechnungen", len(calculations))
     header_cols[2].metric(
         "Vollständig",
         sum(
@@ -3145,42 +3451,33 @@ def render_analysis_area() -> None:
     )
 
     st.divider()
-    analysis_tabs = st.tabs(
-        ["Übersicht & Vergleich", "Diagramme", "Karte", "Tabellen"]
+    selected_results = load_analysis_results(
+        db,
+        event_id,
+        calculations,
     )
+    if len(selected_results) < 2:
+        return
 
-    # In 3.7.1 use the common comparison engine in the first two tabs.
-    # Later sources (parameter studies, pacing, current result) will feed the
-    # same engine without changing its data contract.
-    with analysis_tabs[0]:
-        render_saved_calculation_comparison(
-            db,
-            event_id,
-            calculations,
-            show_series_section=False,
-            key_prefix="analysis_overview",
+    render_analysis_kpi_cards(selected_results)
+    st.divider()
+    render_analysis_main_chart(selected_results, event_id)
+    st.divider()
+    render_analysis_differences(selected_results, event_id)
+
+    with st.expander("Vollständige Vergleichstabelle", expanded=False):
+        summary_df = build_comparison_summary(selected_results)
+        st.dataframe(
+            summary_df,
+            use_container_width=True,
+            hide_index=True,
         )
-
-    with analysis_tabs[1]:
-        render_saved_calculation_comparison(
-            db,
-            event_id,
-            calculations,
-            show_summary_section=False,
-            show_difference_section=False,
-            key_prefix="analysis_diagrams",
-        )
-
-    with analysis_tabs[2]:
-        st.info(
-            "Der gemeinsame Kartenvergleich wird in Version 3.7.2 ergänzt. "
-            "Die gespeicherten Trackdaten sind bereits Bestandteil der Ergebnisse."
-        )
-
-    with analysis_tabs[3]:
-        st.info(
-            "Gemeinsame Detailtabellen aus mehreren Berechnungen werden in "
-            "Version 3.7.2 ergänzt."
+        st.download_button(
+            "Vergleichstabelle als CSV herunterladen",
+            data=summary_df.to_csv(index=False).encode("utf-8"),
+            file_name="berechnungsvergleich.csv",
+            mime="text/csv",
+            use_container_width=True,
         )
 
 
