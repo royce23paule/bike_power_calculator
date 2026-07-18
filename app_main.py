@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.7.4"
+APP_VERSION = "3.7.4.1"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -3470,11 +3470,10 @@ def render_analysis_comparison_map(
                 and scale_max is not None
                 and np.isfinite(metric_array[index])
             ):
-                color = metric_to_rgba(
-                    float(metric_array[index]),
-                    scale_min,
-                    scale_max,
-                )
+                normalized_value = (
+                    float(metric_array[index]) - scale_min
+                ) / (scale_max - scale_min)
+                color = _color_from_normalized(normalized_value)
                 value_text = (
                     f"{float(metric_array[index]):.2f} "
                     f"{_analysis_metric_unit(color_mode)}"

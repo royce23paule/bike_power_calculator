@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.7.4.1
+- NameError in der Vergleichskarte behoben
+- Kartenfarbskala verwendet jetzt die vorhandene interne Farbfunktion
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.7.4
 - Gemeinsame Vergleichskarte für mehrere gespeicherte Berechnungen
 - Sichtbarkeit einzelner Läufe direkt in der Analyse umschaltbar
