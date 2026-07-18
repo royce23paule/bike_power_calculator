@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.7.3"
+APP_VERSION = "3.7.4"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -3302,6 +3302,317 @@ def render_analysis_main_chart(
     )
 
 
+
+ANALYSIS_RUN_COLORS = [
+    [220, 55, 55, 225],
+    [45, 105, 220, 225],
+    [35, 165, 85, 225],
+    [235, 145, 35, 225],
+    [150, 70, 200, 225],
+    [20, 165, 175, 225],
+    [215, 80, 145, 225],
+    [105, 105, 105, 225],
+]
+
+
+def _analysis_metric_values(
+    result: dict[str, Any],
+    metric_name: str,
+) -> list[Any] | None:
+    metric_keys = {
+        "Berechnung": None,
+        "Geschwindigkeit": "map_speed_kmh",
+        "Leistung": "map_power_w",
+        "Wind": "map_wind_kmh",
+        "Windkomponente": "map_wind_component_kmh",
+        "Relative Luftgeschwindigkeit": "map_air_speed_kmh",
+        "Höhe": "map_elevation_m",
+        "Steigung": "map_grade_percent",
+    }
+    key = metric_keys.get(metric_name)
+    if key is None:
+        return None
+    values = result.get(key)
+    return values if isinstance(values, list) else None
+
+
+def _analysis_metric_unit(metric_name: str) -> str:
+    return {
+        "Geschwindigkeit": "km/h",
+        "Leistung": "W",
+        "Wind": "km/h",
+        "Windkomponente": "km/h",
+        "Relative Luftgeschwindigkeit": "km/h",
+        "Höhe": "m",
+        "Steigung": "%",
+    }.get(metric_name, "")
+
+
+def render_analysis_comparison_map(
+    selected_results: list[dict[str, Any]],
+    event_id: str,
+) -> None:
+    st.markdown("### Kartenvergleich")
+
+    controls = st.columns([2, 1])
+    with controls[0]:
+        color_mode = st.selectbox(
+            "Darstellung",
+            [
+                "Berechnung",
+                "Geschwindigkeit",
+                "Leistung",
+                "Wind",
+                "Windkomponente",
+                "Relative Luftgeschwindigkeit",
+                "Höhe",
+                "Steigung",
+            ],
+            key=f"analysis_map_mode_{event_id}",
+            help=(
+                "„Berechnung“ verwendet für jeden Lauf eine feste Farbe. "
+                "Die übrigen Modi färben alle Läufe auf einer gemeinsamen Skala ein."
+            ),
+        )
+    with controls[1]:
+        line_width = st.slider(
+            "Linienbreite",
+            min_value=2,
+            max_value=12,
+            value=6,
+            key=f"analysis_map_width_{event_id}",
+        )
+
+    visible_names = st.multiselect(
+        "Sichtbare Berechnungen",
+        [item["name"] for item in selected_results],
+        default=[item["name"] for item in selected_results],
+        key=f"analysis_map_visible_{event_id}",
+    )
+    visible_results = [
+        item for item in selected_results
+        if item["name"] in visible_names
+    ]
+    if not visible_results:
+        st.info("Bitte mindestens eine Berechnung für die Karte auswählen.")
+        return
+
+    metric_arrays: list[np.ndarray] = []
+    if color_mode != "Berechnung":
+        for item in visible_results:
+            values = _analysis_metric_values(item["result"], color_mode)
+            if values:
+                array = np.asarray(values, dtype=float)
+                finite = array[np.isfinite(array)]
+                if finite.size:
+                    metric_arrays.append(finite)
+
+    scale_min = scale_max = None
+    if metric_arrays:
+        combined = np.concatenate(metric_arrays)
+        scale_min = float(np.nanpercentile(combined, 5))
+        scale_max = float(np.nanpercentile(combined, 95))
+        if not np.isfinite(scale_min) or not np.isfinite(scale_max):
+            scale_min = scale_max = None
+        elif abs(scale_max - scale_min) < 1e-12:
+            scale_max = scale_min + 1.0
+
+    layers = []
+    all_latitudes: list[float] = []
+    all_longitudes: list[float] = []
+    legend_rows = []
+
+    for run_index, item in enumerate(visible_results):
+        result = item["result"]
+        lat = result.get("map_latitude")
+        lon = result.get("map_longitude")
+        distance = result.get("map_distance_km")
+        if not isinstance(lat, list) or not isinstance(lon, list):
+            continue
+
+        n = min(len(lat), len(lon))
+        if n < 2:
+            continue
+
+        lat_array = np.asarray(lat[:n], dtype=float)
+        lon_array = np.asarray(lon[:n], dtype=float)
+        valid_coords = np.isfinite(lat_array) & np.isfinite(lon_array)
+        if np.count_nonzero(valid_coords) < 2:
+            continue
+
+        metric_values = _analysis_metric_values(result, color_mode)
+        if metric_values is not None:
+            n = min(n, len(metric_values))
+            lat_array = lat_array[:n]
+            lon_array = lon_array[:n]
+            valid_coords = valid_coords[:n]
+            metric_array = np.asarray(metric_values[:n], dtype=float)
+        else:
+            metric_array = np.full(n, np.nan)
+
+        if isinstance(distance, list):
+            distance_array = np.asarray(distance[:n], dtype=float)
+        else:
+            distance_array = np.arange(n, dtype=float)
+
+        segment_data = []
+        run_color = ANALYSIS_RUN_COLORS[
+            run_index % len(ANALYSIS_RUN_COLORS)
+        ]
+
+        for index in range(n - 1):
+            if not valid_coords[index] or not valid_coords[index + 1]:
+                continue
+
+            if (
+                color_mode != "Berechnung"
+                and scale_min is not None
+                and scale_max is not None
+                and np.isfinite(metric_array[index])
+            ):
+                color = metric_to_rgba(
+                    float(metric_array[index]),
+                    scale_min,
+                    scale_max,
+                )
+                value_text = (
+                    f"{float(metric_array[index]):.2f} "
+                    f"{_analysis_metric_unit(color_mode)}"
+                )
+            else:
+                color = run_color
+                value_text = item["name"]
+
+            segment_data.append(
+                {
+                    "source": [
+                        float(lon_array[index]),
+                        float(lat_array[index]),
+                    ],
+                    "target": [
+                        float(lon_array[index + 1]),
+                        float(lat_array[index + 1]),
+                    ],
+                    "color": color,
+                    "run": item["name"],
+                    "metric": color_mode,
+                    "value": value_text,
+                    "distance": (
+                        f"{float(distance_array[index]):.2f}"
+                        if index < len(distance_array)
+                        and np.isfinite(distance_array[index])
+                        else "—"
+                    ),
+                }
+            )
+
+        if not segment_data:
+            continue
+
+        all_latitudes.extend(lat_array[valid_coords].tolist())
+        all_longitudes.extend(lon_array[valid_coords].tolist())
+
+        layers.append(
+            pdk.Layer(
+                "LineLayer",
+                data=segment_data,
+                get_source_position="source",
+                get_target_position="target",
+                get_color="color",
+                get_width=line_width,
+                width_min_pixels=max(2, line_width - 2),
+                pickable=True,
+            )
+        )
+        legend_rows.append((item["name"], run_color))
+
+    if not layers or not all_latitudes or not all_longitudes:
+        st.info("Für die ausgewählten Berechnungen sind keine GPS-Daten verfügbar.")
+        return
+
+    lat_span = max(all_latitudes) - min(all_latitudes)
+    lon_span = max(all_longitudes) - min(all_longitudes)
+    span = max(lat_span, lon_span)
+    if span < 0.01:
+        zoom = 13
+    elif span < 0.03:
+        zoom = 11
+    elif span < 0.08:
+        zoom = 10
+    elif span < 0.2:
+        zoom = 9
+    elif span < 0.5:
+        zoom = 8
+    else:
+        zoom = 7
+
+    deck = pdk.Deck(
+        layers=layers,
+        initial_view_state=pdk.ViewState(
+            latitude=float(np.nanmean(all_latitudes)),
+            longitude=float(np.nanmean(all_longitudes)),
+            zoom=zoom,
+            pitch=0,
+        ),
+        map_style=None,
+        tooltip={
+            "html": (
+                "<b>{run}</b><br/>"
+                "{metric}: {value}<br/>"
+                "Distanz: {distance} km"
+            ),
+            "style": {
+                "backgroundColor": "rgba(20,20,20,0.92)",
+                "color": "white",
+                "fontSize": "0.85rem",
+            },
+        },
+    )
+    st.pydeck_chart(
+        deck,
+        use_container_width=True,
+        height=650,
+    )
+
+    if color_mode == "Berechnung":
+        legend_html = " ".join(
+            (
+                "<span style='display:inline-flex;align-items:center;"
+                "margin-right:18px;margin-bottom:8px;'>"
+                f"<span style='width:14px;height:14px;border-radius:50%;"
+                f"background:rgba({color[0]},{color[1]},{color[2]},0.9);"
+                "display:inline-block;margin-right:6px;'></span>"
+                f"{name}</span>"
+            )
+            for name, color in legend_rows
+        )
+        st.markdown(legend_html, unsafe_allow_html=True)
+    elif scale_min is not None and scale_max is not None:
+        unit = _analysis_metric_unit(color_mode)
+        st.markdown(
+            f"""
+            <div style="margin-top:0.5rem;margin-bottom:0.75rem;">
+                <div style="
+                    height:18px;border-radius:9px;
+                    background:linear-gradient(
+                        90deg,
+                        rgb(30,90,220) 0%,
+                        rgb(50,230,140) 33%,
+                        rgb(250,210,40) 66%,
+                        rgb(250,50,20) 100%
+                    );
+                    border:1px solid rgba(0,0,0,0.25);
+                "></div>
+                <div style="display:flex;justify-content:space-between;">
+                    <span>{scale_min:.2f} {unit}</span>
+                    <span>{scale_max:.2f} {unit}</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 def render_analysis_differences(
     selected_results: list[dict[str, Any]],
     event_id: str,
@@ -3462,6 +3773,8 @@ def render_analysis_area() -> None:
     render_analysis_kpi_cards(selected_results)
     st.divider()
     render_analysis_main_chart(selected_results, event_id)
+    st.divider()
+    render_analysis_comparison_map(selected_results, event_id)
     st.divider()
     render_analysis_differences(selected_results, event_id)
 

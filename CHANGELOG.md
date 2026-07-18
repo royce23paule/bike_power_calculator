@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.7.4
+- Gemeinsame Vergleichskarte für mehrere gespeicherte Berechnungen
+- Sichtbarkeit einzelner Läufe direkt in der Analyse umschaltbar
+- Feste Lauf-Farben für die eindeutige Zuordnung
+- Gemeinsame Farbskala für Geschwindigkeit, Leistung, Wind, relative Luftgeschwindigkeit, Höhe und Steigung
+- Frei einstellbare Linienbreite
+- Automatische Kartenansicht abhängig von der Streckenausdehnung
+- Tooltips mit Berechnungsname, Messwert und Distanz
+- Bestehende Analyseauswahl und bereits geladene Ergebnisdaten werden wiederverwendet
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.7.3
 - Analysebereich als kompaktes Dashboard neu aufgebaut
 - Berechnungsauswahl wird nur noch einmal gerendert und geladen
