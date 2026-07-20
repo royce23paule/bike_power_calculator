@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.9.2.5
+- Geladene 2D-Studien werden vor den Eingaben für eine neue Studie angezeigt
+- Die Anzeige gespeicherter Studien benötigt keine aktuell gesetzte GPX/FIT-Datei mehr
+- GPX/FIT ist nur noch Voraussetzung für das Starten einer neuen Studie
+- Gleiches robustes Verhalten für geladene 1D-Studien
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.9.2.4
 - Einheitlicher aktiver Studienzustand für neue, lokale und aus GitHub geladene Studien
 - Geladene 1D-/2D-Studie bestimmt unmittelbar den angezeigten Studientyp

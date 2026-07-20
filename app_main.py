@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.9.2.4"
+APP_VERSION = "3.9.2.5"
 BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -1379,8 +1379,23 @@ def render_parameter_study_1d() -> None:
         "Jede Variante verwendet exakt denselben Rechenkern wie der normale Rechner."
     )
 
+    existing_study = st.session_state.get("parameter_study")
+    if isinstance(existing_study, dict) and existing_study.get("runs"):
+        st.markdown("### Aktive Studie")
+        info_cols = st.columns(4)
+        info_cols[0].metric("Parameter", existing_study.get("parameter", "—"))
+        info_cols[1].metric("Simulationen", len(existing_study.get("runs", [])))
+        info_cols[2].metric("Von", f"{existing_study.get('start', 0):g}")
+        info_cols[3].metric("Bis", f"{existing_study.get('end', 0):g}")
+        render_parameter_study_analysis(existing_study)
+        st.divider()
+
+    st.markdown("### Neue 1D-Studie berechnen")
     if not st.session_state.config.get("GPX/FIT Datei"):
-        st.warning("Bitte im Rechner zuerst eine GPX- oder FIT-Strecke auswählen.")
+        st.warning(
+            "Zum Berechnen einer neuen Studie bitte im Rechner zuerst eine "
+            "GPX- oder FIT-Strecke auswählen. Eine bereits geladene Studie bleibt oben sichtbar."
+        )
         return
 
     parameter_name = st.selectbox(
@@ -1507,20 +1522,11 @@ def render_parameter_study_1d() -> None:
             with st.expander("Fehlerdetails", expanded=False):
                 st.code(traceback.format_exc())
 
-    study = st.session_state.get("parameter_study")
-    if not isinstance(study, dict) or not study.get("runs"):
+    if not (
+        isinstance(st.session_state.get("parameter_study"), dict)
+        and st.session_state.parameter_study.get("runs")
+    ):
         st.info("Noch keine Parameterstudie im aktuellen Browser-Sitzungsspeicher.")
-        return
-
-    st.divider()
-    st.markdown("### Letzte Studie")
-    info_cols = st.columns(4)
-    info_cols[0].metric("Parameter", study.get("parameter", "—"))
-    info_cols[1].metric("Simulationen", len(study.get("runs", [])))
-    info_cols[2].metric("Von", f"{study.get('start', 0):g}")
-    info_cols[3].metric("Bis", f"{study.get('end', 0):g}")
-
-    render_parameter_study_analysis(study)
 
 
 
@@ -1720,8 +1726,19 @@ def render_parameter_study_2d() -> None:
         "Zwei Eingabeparameter werden gleichzeitig variiert. Die Heatmap zeigt, "
         "welche Kombinationen auf der gewählten Strecke besonders schnell sind."
     )
+
+    existing_study = st.session_state.get("parameter_study_2d")
+    if isinstance(existing_study, dict) and existing_study.get("runs"):
+        st.markdown("### Aktive 2D-Studie")
+        render_parameter_study_2d_analysis(existing_study)
+        st.divider()
+
+    st.markdown("### Neue 2D-Studie berechnen")
     if not st.session_state.config.get("GPX/FIT Datei"):
-        st.warning("Bitte im Rechner zuerst eine GPX- oder FIT-Strecke auswählen.")
+        st.warning(
+            "Zum Berechnen einer neuen 2D-Studie bitte im Rechner zuerst eine "
+            "GPX- oder FIT-Strecke auswählen. Eine bereits geladene Studie bleibt oben sichtbar."
+        )
         return
 
     names = list(PARAMETER_STUDY_DEFINITIONS.keys())
@@ -1798,13 +1815,14 @@ def render_parameter_study_2d() -> None:
             st.error(f"2D-Parameterstudie abgebrochen: {exc}")
             with st.expander("Fehlerdetails", expanded=False): st.code(traceback.format_exc())
 
-    study = st.session_state.get("parameter_study_2d")
-    if not isinstance(study, dict) or not study.get("runs"):
-        st.info("Noch keine zweidimensionale Parameterstudie im aktuellen Browser-Sitzungsspeicher.")
-        return
-    st.divider()
-    st.markdown("### Letzte 2D-Studie")
-    render_parameter_study_2d_analysis(study)
+    if not (
+        isinstance(st.session_state.get("parameter_study_2d"), dict)
+        and st.session_state.parameter_study_2d.get("runs")
+    ):
+        st.info(
+            "Noch keine zweidimensionale Parameterstudie "
+            "im aktuellen Browser-Sitzungsspeicher."
+        )
 
 
 def render_parameter_study() -> None:
