@@ -73,3 +73,7 @@ Unter „Interaktive Diagramme“ befindet sich eine standardmäßig zugeklappte
 vollständige Auswertung. Die bereits für den PDF-Bericht erzeugten Diagramme und
 Tabellen werden als interaktive Plotly-Grafiken beziehungsweise
 Streamlit-Tabellen dargestellt.
+
+
+## Parameterstudien speichern (3.9.1)
+1D- und 2D-Studien können als `.study.json` exportiert und später über den Upload wiederhergestellt werden.

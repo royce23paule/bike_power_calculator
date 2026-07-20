@@ -75,8 +75,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.9.0"
-BUILD_DATE = "2026-07-14"
+APP_VERSION = "3.9.1"
+BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
 CHANGELOG = {
@@ -155,10 +155,169 @@ def init_session_state() -> None:
         st.session_state.refresh_weather_cache = False
     if "parameter_study" not in st.session_state:
         st.session_state.parameter_study = None
+    if "parameter_study_2d" not in st.session_state:
+        st.session_state.parameter_study_2d = None
+    if "parameter_study_import_message" not in st.session_state:
+        st.session_state.parameter_study_import_message = None
 
 
 def config_to_json_bytes(config: dict[str, Any]) -> bytes:
     return json.dumps(config, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def _study_json_safe(value: Any) -> Any:
+    """Convert simulation data recursively into portable JSON values."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        if isinstance(value, float) and not np.isfinite(value):
+            return None
+        return value
+    if isinstance(value, np.generic):
+        return _study_json_safe(value.item())
+    if isinstance(value, np.ndarray):
+        return [_study_json_safe(item) for item in value.tolist()]
+    if isinstance(value, pd.Series):
+        return _study_json_safe(value.to_dict())
+    if isinstance(value, pd.DataFrame):
+        return [_study_json_safe(row) for row in value.to_dict(orient="records")]
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _study_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_study_json_safe(item) for item in value]
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+    return str(value)
+
+
+def _study_export_payload(study: dict[str, Any], study_type: str, name: str) -> dict[str, Any]:
+    payload = {
+        "file_format": "BikePowerCalculator.ParameterStudy",
+        "schema_version": 1,
+        "app_version": APP_VERSION,
+        "exported_at": datetime.now().isoformat(timespec="seconds"),
+        "study_type": study_type,
+        "name": name.strip() or str(study.get("name") or "Parameterstudie"),
+        "study": study,
+    }
+    return _study_json_safe(payload)
+
+
+def _study_json_bytes(study: dict[str, Any], study_type: str, name: str) -> bytes:
+    return json.dumps(
+        _study_export_payload(study, study_type, name),
+        ensure_ascii=False,
+        indent=2,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _safe_study_filename(name: str, study_type: str) -> str:
+    stem = re.sub(r"[^A-Za-z0-9ÄÖÜäöüß_-]+", "_", name.strip()).strip("_")
+    if not stem:
+        stem = f"Parameterstudie_{study_type}"
+    return f"{stem}.study.json"
+
+
+def _validate_loaded_study(raw: Any) -> tuple[str, dict[str, Any], str]:
+    if not isinstance(raw, dict):
+        raise ValueError("Die Datei enthält kein gültiges Studienobjekt.")
+    if raw.get("file_format") != "BikePowerCalculator.ParameterStudy":
+        raise ValueError("Die Datei ist keine Bike-Power-Calculator-Parameterstudie.")
+    study_type = str(raw.get("study_type", ""))
+    if study_type not in {"1D", "2D"}:
+        raise ValueError("Unbekannter Studientyp. Erwartet wird 1D oder 2D.")
+    study = raw.get("study")
+    if not isinstance(study, dict) or not isinstance(study.get("runs"), list):
+        raise ValueError("Die Studie enthält keine gültigen Simulationsläufe.")
+    if not study.get("runs"):
+        raise ValueError("Die Studie enthält keine Simulationsläufe.")
+    if study_type == "1D" and not study.get("parameter"):
+        raise ValueError("In der 1D-Studie fehlt der untersuchte Parameter.")
+    if study_type == "2D" and (not study.get("x_parameter") or not study.get("y_parameter")):
+        raise ValueError("In der 2D-Studie fehlen die Achsenparameter.")
+    name = str(raw.get("name") or study.get("name") or "Geladene Parameterstudie")
+    study["name"] = name
+    study["loaded_from_app_version"] = raw.get("app_version")
+    study["loaded_at"] = datetime.now().isoformat(timespec="seconds")
+    return study_type, study, name
+
+
+def render_parameter_study_file_controls() -> None:
+    st.markdown("### 💾 Studien speichern und laden")
+    st.caption(
+        "Der JSON-Export enthält die komplette Studie einschließlich Parameterbereichen, "
+        "Referenzwerten, Konfigurationen und Simulationsergebnissen."
+    )
+
+    current_type = "2D" if str(st.session_state.get("parameter_study_type", "")).startswith("2D") else "1D"
+    state_key = "parameter_study_2d" if current_type == "2D" else "parameter_study"
+    study = st.session_state.get(state_key)
+
+    left, right = st.columns(2)
+    with left:
+        default_name = ""
+        if isinstance(study, dict):
+            default_name = str(study.get("name") or "")
+            if not default_name:
+                if current_type == "1D":
+                    default_name = str(study.get("parameter") or "Parameterstudie")
+                else:
+                    default_name = f"{study.get('x_parameter', 'X')} × {study.get('y_parameter', 'Y')}"
+        name = st.text_input(
+            "Name der aktuellen Studie",
+            value=default_name,
+            key=f"parameter_study_export_name_{current_type.lower()}",
+        )
+        if isinstance(study, dict) and study.get("runs"):
+            st.download_button(
+                "Aktuelle Studie als JSON speichern",
+                data=_study_json_bytes(study, current_type, name),
+                file_name=_safe_study_filename(name, current_type),
+                mime="application/json",
+                use_container_width=True,
+                key=f"parameter_study_json_download_{current_type.lower()}",
+            )
+        else:
+            st.info(f"Noch keine {current_type}-Studie zum Speichern vorhanden.")
+
+    with right:
+        uploaded = st.file_uploader(
+            "Gespeicherte Studie laden",
+            type=["json", "study"],
+            key="parameter_study_json_upload",
+            help="Unterstützt die von dieser App erzeugten *.study.json-Dateien.",
+        )
+        if uploaded is not None:
+            if st.button(
+                "Studie aus Datei übernehmen",
+                type="primary",
+                use_container_width=True,
+                key="parameter_study_json_load_button",
+            ):
+                try:
+                    raw = json.loads(uploaded.getvalue().decode("utf-8-sig"))
+                    loaded_type, loaded_study, loaded_name = _validate_loaded_study(raw)
+                    if loaded_type == "1D":
+                        st.session_state.parameter_study = loaded_study
+                        st.session_state.parameter_study_pending_type = "1D – ein Parameter"
+                    else:
+                        st.session_state.parameter_study_2d = loaded_study
+                        st.session_state.parameter_study_pending_type = "2D – zwei Parameter"
+                    st.session_state.parameter_study_import_message = (
+                        f"Studie ‚{loaded_name}‘ ({loaded_type}) wurde geladen."
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Studie konnte nicht geladen werden: {exc}")
+
+    message = st.session_state.get("parameter_study_import_message")
+    if message:
+        st.success(message)
+        st.session_state.parameter_study_import_message = None
 
 
 # ---------------------------------------------------------------------------
@@ -1101,6 +1260,8 @@ def render_parameter_study_1d() -> None:
                 "id": str(uuid.uuid4()),
                 "name": f"{parameter_name} {start:g}–{end:g} {unit}".strip(),
                 "created_at": started_at,
+                "study_schema_version": 1,
+                "source_app_version": APP_VERSION,
                 "parameter": parameter_name,
                 "definition": dict(definition),
                 "start": float(start),
@@ -1392,6 +1553,8 @@ def render_parameter_study_2d() -> None:
                     progress.progress(int(index / total * 100), text=f"{index} von {total} Simulationen abgeschlossen")
             st.session_state.parameter_study_2d = {
                 "id": str(uuid.uuid4()), "created_at": datetime.now().isoformat(timespec="seconds"),
+                "name": f"{x_name} × {y_name}",
+                "study_schema_version": 1, "source_app_version": APP_VERSION,
                 "x_parameter": x_name, "y_parameter": y_name,
                 "x_definition": dict(x_definition), "y_definition": dict(y_definition),
                 "x_start": x_start, "x_end": x_end, "x_step": x_step,
@@ -1415,12 +1578,18 @@ def render_parameter_study_2d() -> None:
 
 
 def render_parameter_study() -> None:
+    pending_type = st.session_state.pop("parameter_study_pending_type", None)
+    if pending_type in {"1D – ein Parameter", "2D – zwei Parameter"}:
+        st.session_state.parameter_study_type = pending_type
+
     study_type = st.radio(
         "Studientyp",
         ["1D – ein Parameter", "2D – zwei Parameter"],
         horizontal=True,
         key="parameter_study_type",
     )
+    render_parameter_study_file_controls()
+    st.divider()
     if study_type.startswith("1D"):
         render_parameter_study_1d()
     else:

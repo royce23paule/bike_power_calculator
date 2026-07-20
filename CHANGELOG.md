@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.9.1
+- Vollständige 1D- und 2D-Parameterstudien als JSON speichern
+- Gespeicherte Studien wieder laden und automatisch dem richtigen Studientyp zuordnen
+- Export enthält Parameterbereiche, Referenzwerte, Konfigurationen, Ergebnisse und App-Version
+- Robuste JSON-Konvertierung für NumPy-, Pandas- und Datumswerte
+- Validierung inkompatibler oder beschädigter Studiendateien
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.9.0
 - Zweidimensionale Parameterstudien mit frei wählbarer X- und Y-Achse
 - Unterstützte Parameter: CdA, Leistung, Fahrergewicht und Crr
