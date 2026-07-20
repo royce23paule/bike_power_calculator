@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.8.1
+- Referenzorientierte Auswertung von Parameterstudien
+- KPI-Karten für schnellste Variante, Referenzpunkt, Referenzdifferenz und Zeitspannweite
+- Interaktive Diagramme für Fahrzeit, Zeitgewinn, Geschwindigkeit, AP und NP
+- Automatisches Kurzfazit zur Wirkung des untersuchten Parameters
+- Referenzpunkt wird als nächstgelegener Studienwert zum aktuellen Rechnerwert markiert
+- Erweiterte Ergebnistabelle und CSV-Export
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.8.0.1
 - StreamlitInvalidNumberFormatError in der Parameterstudie behoben
 - Zahlenfelder verwenden jetzt gültige Streamlit-Formatstrings

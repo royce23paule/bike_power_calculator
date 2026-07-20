@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.8.0.1"
+APP_VERSION = "3.8.1"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -498,6 +498,249 @@ def _parameter_study_summary_row(
     }
 
 
+
+def _parameter_study_reference_number(
+    raw_value: Any,
+    definition: dict[str, Any],
+) -> float | None:
+    try:
+        if str(definition.get("field")) == "cdA im Flachen [m^2]":
+            return float(str(raw_value).split(",")[0].strip())
+        return float(raw_value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parameter_study_seconds(value: Any) -> float | None:
+    try:
+        number = float(value)
+        return number if np.isfinite(number) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_signed_duration(seconds: float | None) -> str:
+    if seconds is None or not np.isfinite(seconds):
+        return "—"
+    sign = "+" if seconds > 0 else "−" if seconds < 0 else "±"
+    total = int(round(abs(seconds)))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{sign}{hours}:{minutes:02d}:{secs:02d}"
+    return f"{sign}{minutes}:{secs:02d}"
+
+
+def _parameter_study_analysis_frame(study: dict[str, Any]) -> tuple[pd.DataFrame, int | None]:
+    rows = []
+    for run in study.get("runs", []):
+        summary = dict(run.get("summary", {}))
+        summary["Wert"] = run.get("value")
+        rows.append(summary)
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame, None
+
+    frame["Wert"] = pd.to_numeric(frame["Wert"], errors="coerce")
+    frame["Zeit [s]"] = pd.to_numeric(frame.get("Zeit [s]"), errors="coerce")
+    for column in [
+        "Ø Geschwindigkeit [km/h]",
+        "Average Power [W]",
+        "Normalized Power [W]",
+    ]:
+        if column in frame:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    definition = study.get("definition", {})
+    reference_number = _parameter_study_reference_number(
+        study.get("reference_value"), definition
+    )
+    reference_index = None
+    if reference_number is not None and frame["Wert"].notna().any():
+        reference_index = int((frame["Wert"] - reference_number).abs().idxmin())
+        reference_seconds = _parameter_study_seconds(
+            frame.loc[reference_index, "Zeit [s]"]
+        )
+        if reference_seconds is not None:
+            frame["Differenz zur Referenz [s]"] = frame["Zeit [s]"] - reference_seconds
+            frame["Zeitgewinn zur Referenz [s]"] = reference_seconds - frame["Zeit [s]"]
+    return frame.sort_values("Wert").reset_index(drop=True), reference_index
+
+
+def _parameter_study_insight(
+    study: dict[str, Any],
+    frame: pd.DataFrame,
+) -> str:
+    valid = frame.dropna(subset=["Wert", "Zeit [s]"]).sort_values("Wert")
+    if len(valid) < 2:
+        return "Für ein automatisches Fazit werden mindestens zwei gültige Studienpunkte benötigt."
+
+    first = valid.iloc[0]
+    last = valid.iloc[-1]
+    delta_parameter = float(last["Wert"] - first["Wert"])
+    delta_time = float(last["Zeit [s]"] - first["Zeit [s]"])
+    unit = str(study.get("definition", {}).get("unit", ""))
+    parameter = str(study.get("parameter", "Parameter"))
+    per_unit = delta_time / delta_parameter if abs(delta_parameter) > 1e-12 else None
+
+    if delta_time > 0:
+        direction = "verlängert"
+    elif delta_time < 0:
+        direction = "verkürzt"
+    else:
+        direction = "verändert"
+
+    statement = (
+        f"Eine Erhöhung von {parameter} von {first['Wert']:g} auf "
+        f"{last['Wert']:g} {unit} {direction} die berechnete Fahrzeit um "
+        f"{_format_signed_duration(abs(delta_time)).lstrip('+−±')}."
+    )
+    if per_unit is not None:
+        statement += (
+            f" Im untersuchten Bereich entspricht das im Mittel etwa "
+            f"{abs(per_unit):.1f} Sekunden je {unit or 'Parametereinheit'}."
+        )
+    return statement
+
+
+def render_parameter_study_analysis(study: dict[str, Any]) -> None:
+    frame, _ = _parameter_study_analysis_frame(study)
+    if frame.empty:
+        st.info("Für diese Studie liegen keine auswertbaren Ergebnisse vor.")
+        return
+
+    valid_time = frame.dropna(subset=["Zeit [s]"])
+    if valid_time.empty:
+        st.warning("Die Studienläufe enthalten keine auswertbaren Fahrzeiten.")
+        return
+
+    best_row = valid_time.loc[valid_time["Zeit [s]"].idxmin()]
+    worst_row = valid_time.loc[valid_time["Zeit [s]"].idxmax()]
+    reference_number = _parameter_study_reference_number(
+        study.get("reference_value"), study.get("definition", {})
+    )
+    if reference_number is not None:
+        reference_row = frame.loc[(frame["Wert"] - reference_number).abs().idxmin()]
+    else:
+        reference_row = None
+
+    unit = str(study.get("definition", {}).get("unit", ""))
+    total_gain = float(worst_row["Zeit [s]"] - best_row["Zeit [s]"])
+    kpis = st.columns(4)
+    kpis[0].metric(
+        "Schnellste Variante",
+        f"{best_row['Wert']:g} {unit}".strip(),
+        format_duration(best_row["Zeit [s]"]),
+    )
+    if reference_row is not None:
+        kpis[1].metric(
+            "Referenzpunkt",
+            f"{reference_row['Wert']:g} {unit}".strip(),
+            format_duration(reference_row["Zeit [s]"]),
+            help="Nächstgelegener Studienpunkt zum aktuellen Rechnerwert.",
+        )
+        best_gain = float(reference_row["Zeit [s]"] - best_row["Zeit [s]"])
+        kpis[2].metric("Bestes Ergebnis vs. Referenz", _format_signed_duration(-best_gain))
+    else:
+        kpis[1].metric("Referenzpunkt", "—")
+        kpis[2].metric("Bestes Ergebnis vs. Referenz", "—")
+    kpis[3].metric("Spannweite der Fahrzeit", format_duration(total_gain))
+
+    st.info(_parameter_study_insight(study, frame))
+
+    tabs = st.tabs(["Fahrzeit", "Geschwindigkeit", "Leistung", "Tabelle"])
+    parameter = str(study.get("parameter", "Parameter"))
+
+    with tabs[0]:
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=frame["Wert"], y=frame["Zeit [s]"] / 60.0,
+            mode="lines+markers", name="Fahrzeit",
+            customdata=frame[["Zeit"]].to_numpy(),
+            hovertemplate=(
+                f"{parameter}: %{{x:g}} {unit}<br>"
+                "Fahrzeit: %{customdata[0]}<extra></extra>"
+            ),
+        ))
+        if reference_row is not None:
+            fig.add_vline(
+                x=float(reference_row["Wert"]), line_dash="dash",
+                annotation_text="Referenz", annotation_position="top",
+            )
+        fig.update_layout(
+            xaxis_title=f"{parameter} [{unit}]" if unit else parameter,
+            yaxis_title="Fahrzeit [min]",
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig, use_container_width=True, key="parameter_study_time_chart")
+
+        if "Zeitgewinn zur Referenz [s]" in frame:
+            gain_fig = go.Figure(go.Bar(
+                x=frame["Wert"],
+                y=frame["Zeitgewinn zur Referenz [s]"] / 60.0,
+                name="Zeitgewinn",
+                hovertemplate=(
+                    f"{parameter}: %{{x:g}} {unit}<br>"
+                    "Zeitgewinn: %{y:.2f} min<extra></extra>"
+                ),
+            ))
+            gain_fig.add_hline(y=0)
+            gain_fig.update_layout(
+                xaxis_title=f"{parameter} [{unit}]" if unit else parameter,
+                yaxis_title="Zeitgewinn zur Referenz [min]",
+            )
+            st.plotly_chart(gain_fig, use_container_width=True, key="parameter_study_gain_chart")
+
+    with tabs[1]:
+        if "Ø Geschwindigkeit [km/h]" in frame:
+            fig = go.Figure(go.Scatter(
+                x=frame["Wert"], y=frame["Ø Geschwindigkeit [km/h]"],
+                mode="lines+markers", name="Ø Geschwindigkeit",
+            ))
+            if reference_row is not None:
+                fig.add_vline(x=float(reference_row["Wert"]), line_dash="dash")
+            fig.update_layout(
+                xaxis_title=f"{parameter} [{unit}]" if unit else parameter,
+                yaxis_title="Ø Geschwindigkeit [km/h]",
+            )
+            st.plotly_chart(fig, use_container_width=True, key="parameter_study_speed_chart")
+
+    with tabs[2]:
+        fig = go.Figure()
+        if "Average Power [W]" in frame:
+            fig.add_trace(go.Scatter(
+                x=frame["Wert"], y=frame["Average Power [W]"],
+                mode="lines+markers", name="AP",
+            ))
+        if "Normalized Power [W]" in frame:
+            fig.add_trace(go.Scatter(
+                x=frame["Wert"], y=frame["Normalized Power [W]"],
+                mode="lines+markers", name="NP",
+            ))
+        fig.update_layout(
+            xaxis_title=f"{parameter} [{unit}]" if unit else parameter,
+            yaxis_title="Leistung [W]",
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig, use_container_width=True, key="parameter_study_power_chart")
+
+    with tabs[3]:
+        display_frame = frame.copy()
+        if "Differenz zur Referenz [s]" in display_frame:
+            display_frame["Differenz zur Referenz"] = display_frame[
+                "Differenz zur Referenz [s]"
+            ].apply(_format_signed_duration)
+        st.dataframe(display_frame, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Studienergebnisse als CSV herunterladen",
+            data=display_frame.to_csv(index=False).encode("utf-8"),
+            file_name="parameterstudie.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="parameter_study_csv",
+        )
+
+
 def render_parameter_study() -> None:
     st.markdown("## 🧪 Parameterstudie")
     st.caption(
@@ -555,7 +798,7 @@ def render_parameter_study() -> None:
     st.metric("Anzahl Simulationen", len(values))
     if len(values) > 25:
         st.error(
-            "In Version 3.8.0.1 sind maximal 25 Simulationen pro Studie erlaubt. "
+            "In Version 3.8.1 sind maximal 25 Simulationen pro Studie erlaubt. "
             "Bitte Bereich oder Schrittweite anpassen."
         )
         return
@@ -643,17 +886,7 @@ def render_parameter_study() -> None:
     info_cols[2].metric("Von", f"{study.get('start', 0):g}")
     info_cols[3].metric("Bis", f"{study.get('end', 0):g}")
 
-    summary_df = pd.DataFrame(
-        [run["summary"] for run in study.get("runs", [])]
-    )
-    st.dataframe(summary_df, use_container_width=True, hide_index=True)
-    st.download_button(
-        "Studienergebnisse als CSV herunterladen",
-        data=summary_df.to_csv(index=False).encode("utf-8"),
-        file_name="parameterstudie.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+    render_parameter_study_analysis(study)
 
 
 
