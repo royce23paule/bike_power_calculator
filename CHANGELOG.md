@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.8.0
+- Universelle Basis für eindimensionale Parameterstudien
+- Neue Analyseart „Parameterstudie“
+- Unterstützte Parameter: CdA flach, Leistung bei 0 %, Fahrergewicht und Crr
+- Maximal 25 automatische Simulationen pro Studie
+- Fortschrittsanzeige und aktueller Simulationswert
+- Ergebnisse bleiben während der Browser-Sitzung erhalten
+- Ergebnistabelle und CSV-Export
+- Gemeinsamer Einstiegspunkt `run_single_simulation` für Rechner und Studien
+- Studien verwenden exakt denselben Rechenkern wie normale Berechnungen
+- PDF und HTML-Karte sind bei Studienläufen zur Laufzeitersparnis deaktiviert
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.7.4.1
 - NameError in der Vergleichskarte behoben
 - Kartenfarbskala verwendet jetzt die vorhandene interne Farbfunktion

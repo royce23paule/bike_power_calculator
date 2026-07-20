@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.7.4.1"
+APP_VERSION = "3.8.0"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -153,6 +153,8 @@ def init_session_state() -> None:
         st.session_state.developer_mode = False
     if "refresh_weather_cache" not in st.session_state:
         st.session_state.refresh_weather_cache = False
+    if "parameter_study" not in st.session_state:
+        st.session_state.parameter_study = None
 
 
 def config_to_json_bytes(config: dict[str, Any]) -> bytes:
@@ -361,6 +363,294 @@ def call_bike_power_calc(config: dict[str, Any], generate_pdf: bool = True, gene
         generate_pdf,
         generate_html_map,
     )
+
+
+def run_single_simulation(
+    config: dict[str, Any],
+    *,
+    generate_pdf: bool = False,
+    generate_html_map: bool = False,
+) -> dict[str, Any]:
+    """Gemeinsamer Einstiegspunkt für Rechner, Studien und spätere Optimierer."""
+    run_config = normalize_loaded_config(dict(config))
+    run_config["GPX/FIT Datei"] = resolve_repository_path(
+        str(run_config.get("GPX/FIT Datei", ""))
+    )
+    run_config["Wetterdatei Advanced Weather"] = resolve_repository_path(
+        str(run_config.get("Wetterdatei Advanced Weather", ""))
+    )
+    return call_bike_power_calc(
+        run_config,
+        generate_pdf=generate_pdf,
+        generate_html_map=generate_html_map,
+    )
+
+
+PARAMETER_STUDY_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "CdA im Flachen": {
+        "field": "cdA im Flachen [m^2]",
+        "unit": "m²",
+        "default_start": 0.205,
+        "default_end": 0.225,
+        "default_step": 0.002,
+        "min": 0.10,
+        "max": 0.60,
+        "format": ".3f",
+    },
+    "Leistung bei 0 % Steigung": {
+        "field": "Leistung bei 0% Steigung [W]",
+        "unit": "W",
+        "default_start": 170.0,
+        "default_end": 210.0,
+        "default_step": 5.0,
+        "min": 20.0,
+        "max": 1000.0,
+        "format": ".1f",
+    },
+    "Fahrergewicht": {
+        "field": "Gewicht Fahrer [kg]",
+        "unit": "kg",
+        "default_start": 70.0,
+        "default_end": 78.0,
+        "default_step": 1.0,
+        "min": 20.0,
+        "max": 250.0,
+        "format": ".1f",
+    },
+    "Rollwiderstand Crr": {
+        "field": "Rollwiderstand cr [-]",
+        "unit": "",
+        "default_start": 0.0025,
+        "default_end": 0.0040,
+        "default_step": 0.00025,
+        "min": 0.0005,
+        "max": 0.0200,
+        "format": ".5f",
+    },
+}
+
+
+def _parameter_study_values(
+    start: float,
+    end: float,
+    step: float,
+) -> list[float]:
+    if step <= 0:
+        raise ValueError("Die Schrittweite muss größer als null sein.")
+    if end < start:
+        raise ValueError("Der Endwert muss mindestens so groß wie der Startwert sein.")
+    count = int(np.floor((end - start) / step + 1e-9)) + 1
+    values = [start + index * step for index in range(count)]
+    if values and values[-1] < end - max(abs(step) * 1e-8, 1e-12):
+        values.append(end)
+    return [float(value) for value in values]
+
+
+def _set_parameter_study_value(
+    config: dict[str, Any],
+    definition: dict[str, Any],
+    value: float,
+) -> None:
+    field = str(definition["field"])
+    if field == "cdA im Flachen [m^2]":
+        current = str(config.get(field, ""))
+        parts = [part.strip() for part in current.split(",")]
+        config[field] = (
+            f"{value:.6g},{parts[1]}"
+            if len(parts) > 1 and parts[1]
+            else f"{value:.6g}"
+        )
+    else:
+        config[field] = float(value)
+
+
+def _parameter_study_summary_row(
+    parameter_name: str,
+    definition: dict[str, Any],
+    value: float,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "Parameter": parameter_name,
+        "Wert": value,
+        "Einheit": definition.get("unit", ""),
+        "Zeit [s]": result.get("duration_s"),
+        "Zeit": format_duration(result.get("duration_s")),
+        "Ø Geschwindigkeit [km/h]": _comparison_metric_value(
+            result,
+            "average_speed_kmh",
+            "calibration_speed_kmh",
+        ),
+        "Average Power [W]": _comparison_metric_value(
+            result,
+            "average_power_w",
+            "calibration_ap",
+        ),
+        "Normalized Power [W]": _comparison_metric_value(
+            result,
+            "normalized_power_w",
+            "calibration_np",
+        ),
+    }
+
+
+def render_parameter_study() -> None:
+    st.markdown("## 🧪 Parameterstudie")
+    st.caption(
+        "Ein Eingabeparameter wird über einen Wertebereich variiert. "
+        "Jede Variante verwendet exakt denselben Rechenkern wie der normale Rechner."
+    )
+
+    if not st.session_state.config.get("GPX/FIT Datei"):
+        st.warning("Bitte im Rechner zuerst eine GPX- oder FIT-Strecke auswählen.")
+        return
+
+    parameter_name = st.selectbox(
+        "Parameter",
+        list(PARAMETER_STUDY_DEFINITIONS.keys()),
+        key="parameter_study_parameter",
+    )
+    definition = PARAMETER_STUDY_DEFINITIONS[parameter_name]
+    signature = re.sub(r"[^a-z0-9]+", "_", parameter_name.lower()).strip("_")
+
+    cols = st.columns(3)
+    with cols[0]:
+        start = st.number_input(
+            "Von",
+            min_value=float(definition["min"]),
+            max_value=float(definition["max"]),
+            value=float(definition["default_start"]),
+            format=str(definition["format"]),
+            key=f"parameter_study_start_{signature}",
+        )
+    with cols[1]:
+        end = st.number_input(
+            "Bis",
+            min_value=float(definition["min"]),
+            max_value=float(definition["max"]),
+            value=float(definition["default_end"]),
+            format=str(definition["format"]),
+            key=f"parameter_study_end_{signature}",
+        )
+    with cols[2]:
+        step = st.number_input(
+            "Schrittweite",
+            min_value=10 ** (-max(1, len(str(definition["format"]).split(".")[-1].rstrip("f")))),
+            value=float(definition["default_step"]),
+            format=str(definition["format"]),
+            key=f"parameter_study_step_{signature}",
+        )
+
+    try:
+        values = _parameter_study_values(float(start), float(end), float(step))
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+
+    unit = str(definition.get("unit", ""))
+    st.metric("Anzahl Simulationen", len(values))
+    if len(values) > 25:
+        st.error(
+            "In Version 3.8.0 sind maximal 25 Simulationen pro Studie erlaubt. "
+            "Bitte Bereich oder Schrittweite anpassen."
+        )
+        return
+
+    reference_config = dict(st.session_state.config)
+    reference_raw = reference_config.get(str(definition["field"]))
+    st.caption(f"Aktuelle Referenz aus dem Rechner: {reference_raw} {unit}".strip())
+
+    start_clicked = st.button(
+        "Parameterstudie starten",
+        type="primary",
+        use_container_width=True,
+        key="start_parameter_study",
+    )
+
+    if start_clicked:
+        progress = st.progress(0, text="Parameterstudie wird vorbereitet …")
+        status = st.empty()
+        study_runs: list[dict[str, Any]] = []
+        started_at = datetime.now().isoformat(timespec="seconds")
+        try:
+            for index, value in enumerate(values):
+                config = dict(reference_config)
+                _set_parameter_study_value(config, definition, value)
+                config["Titel"] = f"Studie {parameter_name} = {value:g} {unit}".strip()
+
+                status.info(
+                    f"Simulation {index + 1} von {len(values)}: "
+                    f"{parameter_name} = {value:g} {unit}".strip()
+                )
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    result = run_single_simulation(
+                        config,
+                        generate_pdf=False,
+                        generate_html_map=False,
+                    )
+                study_runs.append(
+                    {
+                        "value": value,
+                        "config": config,
+                        "result": result,
+                        "summary": _parameter_study_summary_row(
+                            parameter_name,
+                            definition,
+                            value,
+                            result,
+                        ),
+                    }
+                )
+                progress.progress(
+                    int((index + 1) / len(values) * 100),
+                    text=f"{index + 1} von {len(values)} Simulationen abgeschlossen",
+                )
+
+            st.session_state.parameter_study = {
+                "id": str(uuid.uuid4()),
+                "name": f"{parameter_name} {start:g}–{end:g} {unit}".strip(),
+                "created_at": started_at,
+                "parameter": parameter_name,
+                "definition": dict(definition),
+                "start": float(start),
+                "end": float(end),
+                "step": float(step),
+                "reference_value": reference_raw,
+                "runs": study_runs,
+            }
+            status.success("Parameterstudie abgeschlossen.")
+        except Exception as exc:
+            progress.empty()
+            status.empty()
+            st.error(f"Parameterstudie abgebrochen: {exc}")
+            with st.expander("Fehlerdetails", expanded=False):
+                st.code(traceback.format_exc())
+
+    study = st.session_state.get("parameter_study")
+    if not isinstance(study, dict) or not study.get("runs"):
+        st.info("Noch keine Parameterstudie im aktuellen Browser-Sitzungsspeicher.")
+        return
+
+    st.divider()
+    st.markdown("### Letzte Studie")
+    info_cols = st.columns(4)
+    info_cols[0].metric("Parameter", study.get("parameter", "—"))
+    info_cols[1].metric("Simulationen", len(study.get("runs", [])))
+    info_cols[2].metric("Von", f"{study.get('start', 0):g}")
+    info_cols[3].metric("Bis", f"{study.get('end', 0):g}")
+
+    summary_df = pd.DataFrame(
+        [run["summary"] for run in study.get("runs", [])]
+    )
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    st.download_button(
+        "Studienergebnisse als CSV herunterladen",
+        data=summary_df.to_csv(index=False).encode("utf-8"),
+        file_name="parameterstudie.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
 
 
 
@@ -3679,12 +3969,8 @@ def render_analysis_differences(
     )
 
 
-def render_analysis_area() -> None:
-    st.title("📊 Analyse")
-    st.caption(
-        "Vergleich gespeicherter Berechnungen. Dieselbe Oberfläche wird später "
-        "auch Parameterstudien und Pacing-Ergebnisse darstellen."
-    )
+def render_saved_calculation_analysis() -> None:
+    st.caption("Vergleich gespeicherter Berechnungen aus der GitHub-Datenbank.")
 
     db = get_github_database()
     if db is None:
@@ -3791,6 +4077,22 @@ def render_analysis_area() -> None:
             mime="text/csv",
             use_container_width=True,
         )
+
+
+
+def render_analysis_area() -> None:
+    st.title("📊 Analyse")
+    analysis_mode = st.radio(
+        "Analyseart",
+        ["Berechnungsvergleich", "Parameterstudie"],
+        horizontal=True,
+        key="analysis_mode",
+    )
+    st.divider()
+    if analysis_mode == "Parameterstudie":
+        render_parameter_study()
+    else:
+        render_saved_calculation_analysis()
 
 
 def main() -> None:
@@ -3970,10 +4272,10 @@ def main() -> None:
                         t_calc_start = time.perf_counter()
                         if st.session_state.refresh_weather_cache:
                             bpc.clear_weather_api_cache()
-                        result = call_bike_power_calc(
+                        result = run_single_simulation(
                             run_config,
-                            st.session_state.generate_pdf,
-                            st.session_state.generate_html_map,
+                            generate_pdf=st.session_state.generate_pdf,
+                            generate_html_map=st.session_state.generate_html_map,
                         )
                         profile["calculation_s"] = time.perf_counter() - t_calc_start
 
