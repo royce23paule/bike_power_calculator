@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.8.0"
+APP_VERSION = "3.8.0.1"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -395,7 +395,8 @@ PARAMETER_STUDY_DEFINITIONS: dict[str, dict[str, Any]] = {
         "default_step": 0.002,
         "min": 0.10,
         "max": 0.60,
-        "format": ".3f",
+        "format": "%.3f",
+        "min_step": 0.0001,
     },
     "Leistung bei 0 % Steigung": {
         "field": "Leistung bei 0% Steigung [W]",
@@ -405,7 +406,8 @@ PARAMETER_STUDY_DEFINITIONS: dict[str, dict[str, Any]] = {
         "default_step": 5.0,
         "min": 20.0,
         "max": 1000.0,
-        "format": ".1f",
+        "format": "%.1f",
+        "min_step": 0.1,
     },
     "Fahrergewicht": {
         "field": "Gewicht Fahrer [kg]",
@@ -415,7 +417,8 @@ PARAMETER_STUDY_DEFINITIONS: dict[str, dict[str, Any]] = {
         "default_step": 1.0,
         "min": 20.0,
         "max": 250.0,
-        "format": ".1f",
+        "format": "%.1f",
+        "min_step": 0.1,
     },
     "Rollwiderstand Crr": {
         "field": "Rollwiderstand cr [-]",
@@ -425,7 +428,8 @@ PARAMETER_STUDY_DEFINITIONS: dict[str, dict[str, Any]] = {
         "default_step": 0.00025,
         "min": 0.0005,
         "max": 0.0200,
-        "format": ".5f",
+        "format": "%.5f",
+        "min_step": 0.00001,
     },
 }
 
@@ -535,7 +539,7 @@ def render_parameter_study() -> None:
     with cols[2]:
         step = st.number_input(
             "Schrittweite",
-            min_value=10 ** (-max(1, len(str(definition["format"]).split(".")[-1].rstrip("f")))),
+            min_value=float(definition["min_step"]),
             value=float(definition["default_step"]),
             format=str(definition["format"]),
             key=f"parameter_study_step_{signature}",
@@ -551,7 +555,7 @@ def render_parameter_study() -> None:
     st.metric("Anzahl Simulationen", len(values))
     if len(values) > 25:
         st.error(
-            "In Version 3.8.0 sind maximal 25 Simulationen pro Studie erlaubt. "
+            "In Version 3.8.0.1 sind maximal 25 Simulationen pro Studie erlaubt. "
             "Bitte Bereich oder Schrittweite anpassen."
         )
         return

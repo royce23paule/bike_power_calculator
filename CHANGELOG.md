@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.8.0.1
+- StreamlitInvalidNumberFormatError in der Parameterstudie behoben
+- Zahlenfelder verwenden jetzt gültige Streamlit-Formatstrings
+- Explizite minimale Schrittweiten für alle Studienparameter
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.8.0
 - Universelle Basis für eindimensionale Parameterstudien
 - Neue Analyseart „Parameterstudie“
