@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.8.2"
+APP_VERSION = "3.9.0"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -985,8 +985,8 @@ def render_parameter_study_analysis(study: dict[str, Any]) -> None:
         )
 
 
-def render_parameter_study() -> None:
-    st.markdown("## 🧪 Parameterstudie")
+def render_parameter_study_1d() -> None:
+    st.markdown("## 🧪 Eindimensionale Parameterstudie")
     st.caption(
         "Ein Eingabeparameter wird über einen Wertebereich variiert. "
         "Jede Variante verwendet exakt denselben Rechenkern wie der normale Rechner."
@@ -1042,7 +1042,7 @@ def render_parameter_study() -> None:
     st.metric("Anzahl Simulationen", len(values))
     if len(values) > 25:
         st.error(
-            "In Version 3.8.2 sind maximal 25 Simulationen pro Studie erlaubt. "
+            "In Version 3.9.0 sind maximal 25 Simulationen pro eindimensionaler Studie erlaubt. "
             "Bitte Bereich oder Schrittweite anpassen."
         )
         return
@@ -1132,6 +1132,299 @@ def render_parameter_study() -> None:
 
     render_parameter_study_analysis(study)
 
+
+
+
+def _parameter_study_2d_frame(study: dict[str, Any]) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for run in study.get("runs", []):
+        row = dict(run.get("summary", {}))
+        row["X"] = run.get("x_value")
+        row["Y"] = run.get("y_value")
+        rows.append(row)
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+    for column in [
+        "X", "Y", "Zeit [s]", "Ø Geschwindigkeit [km/h]",
+        "Average Power [W]", "Normalized Power [W]",
+    ]:
+        if column in frame:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    return frame
+
+
+def _format_heatmap_time(value: Any) -> str:
+    seconds = _parameter_study_seconds(value)
+    if seconds is None:
+        return "—"
+    total = int(round(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+def render_parameter_study_2d_analysis(study: dict[str, Any]) -> None:
+    frame = _parameter_study_2d_frame(study)
+    if frame.empty or frame["Zeit [s]"].dropna().empty:
+        st.info("Für diese zweidimensionale Studie liegen keine auswertbaren Ergebnisse vor.")
+        return
+
+    x_name = str(study.get("x_parameter", "X"))
+    y_name = str(study.get("y_parameter", "Y"))
+    x_definition = study.get("x_definition", {})
+    y_definition = study.get("y_definition", {})
+    x_unit = str(x_definition.get("unit", ""))
+    y_unit = str(y_definition.get("unit", ""))
+
+    valid = frame.dropna(subset=["X", "Y", "Zeit [s]"])
+    best = valid.loc[valid["Zeit [s]"].idxmin()]
+    worst = valid.loc[valid["Zeit [s]"].idxmax()]
+
+    x_reference = _parameter_study_reference_number(
+        study.get("x_reference_value"), x_definition
+    )
+    y_reference = _parameter_study_reference_number(
+        study.get("y_reference_value"), y_definition
+    )
+    reference_row = None
+    if x_reference is not None and y_reference is not None:
+        x_span = max(float(valid["X"].max() - valid["X"].min()), 1e-12)
+        y_span = max(float(valid["Y"].max() - valid["Y"].min()), 1e-12)
+        distance = ((valid["X"] - x_reference) / x_span) ** 2 + ((valid["Y"] - y_reference) / y_span) ** 2
+        reference_row = valid.loc[distance.idxmin()]
+
+    metrics = st.columns(4)
+    metrics[0].metric(
+        "Schnellste Kombination",
+        f"{x_name}: {best['X']:g} {x_unit} | {y_name}: {best['Y']:g} {y_unit}".strip(),
+        _format_heatmap_time(best["Zeit [s]"]),
+    )
+    metrics[1].metric("Zeitspanne", format_duration(float(worst["Zeit [s]"] - best["Zeit [s]"])))
+    metrics[2].metric("Kombinationen", len(valid))
+    if reference_row is not None:
+        metrics[3].metric(
+            "Referenzpunkt",
+            f"{reference_row['X']:g} / {reference_row['Y']:g}",
+            _format_heatmap_time(reference_row["Zeit [s]"]),
+            help="Nächstgelegene berechnete Kombination zu den aktuellen Rechnerwerten.",
+        )
+    else:
+        metrics[3].metric("Referenzpunkt", "—")
+
+    tabs = st.tabs(["Fahrzeit-Heatmap", "Geschwindigkeit", "Tabelle"])
+    x_values = sorted(valid["X"].unique())
+    y_values = sorted(valid["Y"].unique())
+
+    with tabs[0]:
+        time_pivot = valid.pivot(index="Y", columns="X", values="Zeit [s]").reindex(index=y_values, columns=x_values)
+        text = [[_format_heatmap_time(value) for value in row] for row in time_pivot.to_numpy()]
+        fig = go.Figure(go.Heatmap(
+            x=x_values,
+            y=y_values,
+            z=time_pivot.to_numpy() / 60.0,
+            text=text,
+            texttemplate="%{text}",
+            customdata=time_pivot.to_numpy(),
+            colorbar={"title": "Zeit [min]"},
+            hovertemplate=(
+                f"<b>{x_name}: %{{x:g}} {x_unit}</b><br>"
+                f"{y_name}: %{{y:g}} {y_unit}<br>"
+                "Fahrzeit: %{text}<br>"
+                "Zeit: %{z:.2f} min<extra></extra>"
+            ),
+        ))
+        if reference_row is not None:
+            fig.add_trace(go.Scatter(
+                x=[float(reference_row["X"])],
+                y=[float(reference_row["Y"])],
+                mode="markers",
+                name="Referenz",
+                marker={"symbol": "star", "size": 18},
+                hovertemplate="<b>Referenz</b><br>X: %{x:g}<br>Y: %{y:g}<extra></extra>",
+            ))
+        fig.update_layout(
+            xaxis_title=f"{x_name} [{x_unit}]" if x_unit else x_name,
+            yaxis_title=f"{y_name} [{y_unit}]" if y_unit else y_name,
+        )
+        st.plotly_chart(fig, use_container_width=True, key="parameter_study_2d_time_heatmap")
+
+    with tabs[1]:
+        speed_pivot = valid.pivot(index="Y", columns="X", values="Ø Geschwindigkeit [km/h]").reindex(index=y_values, columns=x_values)
+        fig = go.Figure(go.Heatmap(
+            x=x_values,
+            y=y_values,
+            z=speed_pivot.to_numpy(),
+            text=np.round(speed_pivot.to_numpy(), 2),
+            texttemplate="%{text:.2f}",
+            colorbar={"title": "km/h"},
+            hovertemplate=(
+                f"<b>{x_name}: %{{x:g}} {x_unit}</b><br>"
+                f"{y_name}: %{{y:g}} {y_unit}<br>"
+                "Ø Geschwindigkeit: %{z:.2f} km/h<extra></extra>"
+            ),
+        ))
+        if reference_row is not None:
+            fig.add_trace(go.Scatter(
+                x=[float(reference_row["X"])], y=[float(reference_row["Y"])],
+                mode="markers", name="Referenz", marker={"symbol": "star", "size": 18},
+            ))
+        fig.update_layout(
+            xaxis_title=f"{x_name} [{x_unit}]" if x_unit else x_name,
+            yaxis_title=f"{y_name} [{y_unit}]" if y_unit else y_name,
+        )
+        st.plotly_chart(fig, use_container_width=True, key="parameter_study_2d_speed_heatmap")
+
+    with tabs[2]:
+        display = valid.copy()
+        display = display.rename(columns={"X": x_name, "Y": y_name})
+        display["Zeit"] = display["Zeit [s]"].apply(_format_heatmap_time)
+        if reference_row is not None:
+            display["Referenz"] = np.isclose(display[x_name], float(reference_row["X"])) & np.isclose(display[y_name], float(reference_row["Y"]))
+        ordered = [x_name, y_name, "Zeit", "Ø Geschwindigkeit [km/h]", "Average Power [W]", "Normalized Power [W]"]
+        ordered += [column for column in display.columns if column not in ordered and column != "Zeit [s]"]
+        display = display[[column for column in ordered if column in display.columns]]
+        st.dataframe(display, use_container_width=True, hide_index=True)
+        st.download_button(
+            "2D-Studie als CSV herunterladen",
+            data=display.to_csv(index=False).encode("utf-8"),
+            file_name="parameterstudie_2d.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="parameter_study_2d_csv",
+        )
+
+
+def _render_parameter_range_inputs(
+    parameter_name: str,
+    definition: dict[str, Any],
+    prefix: str,
+) -> tuple[float, float, float, list[float]]:
+    signature = re.sub(r"[^a-z0-9]+", "_", parameter_name.lower()).strip("_")
+    cols = st.columns(3)
+    with cols[0]:
+        start = st.number_input(
+            "Von", min_value=float(definition["min"]), max_value=float(definition["max"]),
+            value=float(definition["default_start"]), format=str(definition["format"]),
+            key=f"{prefix}_start_{signature}",
+        )
+    with cols[1]:
+        end = st.number_input(
+            "Bis", min_value=float(definition["min"]), max_value=float(definition["max"]),
+            value=float(definition["default_end"]), format=str(definition["format"]),
+            key=f"{prefix}_end_{signature}",
+        )
+    with cols[2]:
+        step = st.number_input(
+            "Schrittweite", min_value=float(definition["min_step"]),
+            value=float(definition["default_step"]), format=str(definition["format"]),
+            key=f"{prefix}_step_{signature}",
+        )
+    values = _parameter_study_values(float(start), float(end), float(step))
+    return float(start), float(end), float(step), values
+
+
+def render_parameter_study_2d() -> None:
+    st.markdown("## 🧭 Zweidimensionale Parameterstudie")
+    st.caption(
+        "Zwei Eingabeparameter werden gleichzeitig variiert. Die Heatmap zeigt, "
+        "welche Kombinationen auf der gewählten Strecke besonders schnell sind."
+    )
+    if not st.session_state.config.get("GPX/FIT Datei"):
+        st.warning("Bitte im Rechner zuerst eine GPX- oder FIT-Strecke auswählen.")
+        return
+
+    names = list(PARAMETER_STUDY_DEFINITIONS.keys())
+    select_cols = st.columns(2)
+    with select_cols[0]:
+        x_name = st.selectbox("X-Parameter", names, index=0, key="parameter_study_2d_x")
+    with select_cols[1]:
+        y_options = [name for name in names if name != x_name]
+        y_name = st.selectbox("Y-Parameter", y_options, index=0, key="parameter_study_2d_y")
+
+    x_definition = PARAMETER_STUDY_DEFINITIONS[x_name]
+    y_definition = PARAMETER_STUDY_DEFINITIONS[y_name]
+    with st.expander(f"Bereich X: {x_name}", expanded=True):
+        try:
+            x_start, x_end, x_step, x_values = _render_parameter_range_inputs(x_name, x_definition, "study2d_x")
+        except ValueError as exc:
+            st.error(str(exc)); return
+    with st.expander(f"Bereich Y: {y_name}", expanded=True):
+        try:
+            y_start, y_end, y_step, y_values = _render_parameter_range_inputs(y_name, y_definition, "study2d_y")
+        except ValueError as exc:
+            st.error(str(exc)); return
+
+    total = len(x_values) * len(y_values)
+    metrics = st.columns(3)
+    metrics[0].metric("X-Werte", len(x_values))
+    metrics[1].metric("Y-Werte", len(y_values))
+    metrics[2].metric("Simulationen", total)
+    if len(x_values) > 8 or len(y_values) > 8 or total > 36:
+        st.error("Maximal sind 8 Werte je Achse und insgesamt 36 Simulationen erlaubt. Bitte Bereich oder Schrittweite anpassen.")
+        return
+
+    reference_config = dict(st.session_state.config)
+    x_reference = reference_config.get(str(x_definition["field"]))
+    y_reference = reference_config.get(str(y_definition["field"]))
+    st.caption(f"Aktuelle Referenz: {x_name} = {x_reference} {x_definition.get('unit','')} | {y_name} = {y_reference} {y_definition.get('unit','')}")
+
+    if st.button("2D-Parameterstudie starten", type="primary", use_container_width=True, key="start_parameter_study_2d"):
+        progress = st.progress(0, text="2D-Parameterstudie wird vorbereitet …")
+        status = st.empty()
+        runs: list[dict[str, Any]] = []
+        index = 0
+        try:
+            for y_value in y_values:
+                for x_value in x_values:
+                    index += 1
+                    config = dict(reference_config)
+                    _set_parameter_study_value(config, x_definition, x_value)
+                    _set_parameter_study_value(config, y_definition, y_value)
+                    config["Titel"] = f"2D-Studie {x_name}={x_value:g}; {y_name}={y_value:g}"
+                    status.info(f"Simulation {index} von {total}: {x_name} = {x_value:g}, {y_name} = {y_value:g}")
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        result = run_single_simulation(config, generate_pdf=False, generate_html_map=False)
+                    summary = _parameter_study_summary_row(x_name, x_definition, x_value, result)
+                    summary["Y-Parameter"] = y_name
+                    summary["Y-Wert"] = y_value
+                    runs.append({"x_value": x_value, "y_value": y_value, "config": config, "result": result, "summary": summary})
+                    progress.progress(int(index / total * 100), text=f"{index} von {total} Simulationen abgeschlossen")
+            st.session_state.parameter_study_2d = {
+                "id": str(uuid.uuid4()), "created_at": datetime.now().isoformat(timespec="seconds"),
+                "x_parameter": x_name, "y_parameter": y_name,
+                "x_definition": dict(x_definition), "y_definition": dict(y_definition),
+                "x_start": x_start, "x_end": x_end, "x_step": x_step,
+                "y_start": y_start, "y_end": y_end, "y_step": y_step,
+                "x_reference_value": x_reference, "y_reference_value": y_reference,
+                "runs": runs,
+            }
+            status.success("2D-Parameterstudie abgeschlossen.")
+        except Exception as exc:
+            progress.empty(); status.empty()
+            st.error(f"2D-Parameterstudie abgebrochen: {exc}")
+            with st.expander("Fehlerdetails", expanded=False): st.code(traceback.format_exc())
+
+    study = st.session_state.get("parameter_study_2d")
+    if not isinstance(study, dict) or not study.get("runs"):
+        st.info("Noch keine zweidimensionale Parameterstudie im aktuellen Browser-Sitzungsspeicher.")
+        return
+    st.divider()
+    st.markdown("### Letzte 2D-Studie")
+    render_parameter_study_2d_analysis(study)
+
+
+def render_parameter_study() -> None:
+    study_type = st.radio(
+        "Studientyp",
+        ["1D – ein Parameter", "2D – zwei Parameter"],
+        horizontal=True,
+        key="parameter_study_type",
+    )
+    if study_type.startswith("1D"):
+        render_parameter_study_1d()
+    else:
+        render_parameter_study_2d()
 
 
 

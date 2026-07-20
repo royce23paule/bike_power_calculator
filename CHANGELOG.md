@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.9.0
+- Zweidimensionale Parameterstudien mit frei wählbarer X- und Y-Achse
+- Unterstützte Parameter: CdA, Leistung, Fahrergewicht und Crr
+- Fahrzeit-Heatmap mit Zeitwerten in jeder Zelle
+- Geschwindigkeits-Heatmap
+- Referenzkombination als Stern markiert
+- KPI für schnellste Kombination, Zeitspanne und Anzahl der Simulationen
+- Ergebnistabelle und CSV-Export
+- Separate Sitzungsspeicherung für 1D- und 2D-Studien
+- Begrenzung auf maximal 8 Werte je Achse und 36 Simulationen
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.8.2
 - Deutlich sichtbare Referenzmarkierung als Stern in den Studiendiagrammen
 - Erweiterte Hover-Informationen mit Fahrzeit, Referenzdifferenz, Geschwindigkeit, AP und NP
