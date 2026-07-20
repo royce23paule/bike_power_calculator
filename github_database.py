@@ -1723,51 +1723,156 @@ class GitHubDatabase:
         studies.sort(key=lambda item: (not bool(item.get("favorite")), str(item.get("updated_at", ""))), reverse=False)
         return studies
 
-    def save_study(self, payload: dict[str, Any], *, name: str, study_id: str | None = None, favorite: bool | None = None) -> dict[str, Any]:
+    def save_study(
+        self,
+        payload: dict[str, Any],
+        *,
+        name: str,
+        study_id: str | None = None,
+        favorite: bool | None = None,
+    ) -> dict[str, Any]:
+        """Save study and library index in one normal Git commit.
+
+        This deliberately uses the same clone/write/commit/push workflow as
+        saved calculations. It avoids the HTML HTTP-400 responses observed
+        with large REST/Git-Data API request bodies on Streamlit Cloud.
+        """
         study_id = study_id or uuid.uuid4().hex
         now = datetime.now(timezone.utc).isoformat()
-        index, index_sha = self.load_studies_index()
-        existing = next((item for item in index.get("studies", []) if item.get("id") == study_id), None)
+
+        # Load current metadata before cloning so existing timestamps and
+        # favorites are retained.
+        index, _ = self.load_studies_index()
+        existing = next(
+            (item for item in index.get("studies", []) if item.get("id") == study_id),
+            None,
+        )
         created_at = str(existing.get("created_at")) if existing else now
-        is_favorite = bool(existing.get("favorite")) if favorite is None and existing else bool(favorite)
+        is_favorite = (
+            bool(existing.get("favorite"))
+            if favorite is None and existing
+            else bool(favorite)
+        )
+
         payload = dict(payload)
         payload["study_id"] = study_id
         payload["name"] = name.strip() or "Parameterstudie"
         payload["created_at"] = created_at
         payload["updated_at"] = now
         payload["favorite"] = is_favorite
-        study_path = self._study_path(study_id)
+
+        study = (
+            payload.get("study", {})
+            if isinstance(payload.get("study"), dict)
+            else {}
+        )
+        meta = {
+            "id": study_id,
+            "name": payload["name"],
+            "study_type": payload.get("study_type", ""),
+            "favorite": is_favorite,
+            "created_at": created_at,
+            "updated_at": now,
+            "parameter": study.get("parameter", ""),
+            "x_parameter": study.get("x_parameter", ""),
+            "y_parameter": study.get("y_parameter", ""),
+            "run_count": len(study.get("runs", [])),
+        }
+        index["studies"] = [
+            item for item in index.get("studies", [])
+            if item.get("id") != study_id
+        ] + [meta]
+        index["updated_at"] = now
+
         serialized = json.dumps(
-            payload, ensure_ascii=False, separators=(",", ":")
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
         ).encode("utf-8")
         compressed = gzip.compress(serialized, compresslevel=9)
-        loaded_file = self.get_file(study_path)
-        file_sha = loaded_file[1] if loaded_file else None
-        message = f"Save parameter study: {payload['name']}"
-        # GitHub's Contents endpoint can return an HTML 400 page for very
-        # large request bodies. Compressed studies normally remain small;
-        # larger ones are written through the Git Data API instead.
-        if len(compressed) > 750_000:
-            self.put_file_via_git_data(study_path, compressed, message)
-        else:
-            self.put_file(study_path, compressed, message, file_sha)
-        study = payload.get("study", {}) if isinstance(payload.get("study"), dict) else {}
-        meta = {
-            "id": study_id, "name": payload["name"], "study_type": payload.get("study_type", ""),
-            "favorite": is_favorite, "created_at": created_at, "updated_at": now,
-            "parameter": study.get("parameter", ""), "x_parameter": study.get("x_parameter", ""),
-            "y_parameter": study.get("y_parameter", ""), "run_count": len(study.get("runs", [])),
-        }
-        index["studies"] = [item for item in index.get("studies", []) if item.get("id") != study_id] + [meta]
-        index["updated_at"] = now
-        self.put_json(self.studies_index_path, index, f"Update study library: {payload['name']}", index_sha)
+        index_content = json.dumps(
+            index,
+            ensure_ascii=False,
+            indent=2,
+        ).encode("utf-8")
+
+        repository_url = (
+            f"https://github.com/{self.config.owner}/{self.config.repo}.git"
+        )
+        with tempfile.TemporaryDirectory(prefix="bike-power-study-") as temp_dir:
+            self._run_git(
+                [
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--branch",
+                    self.config.branch,
+                    repository_url,
+                    temp_dir,
+                ],
+                timeout_s=180,
+            )
+
+            study_path = self._study_path(study_id)
+            study_target = Path(temp_dir) / study_path
+            study_target.parent.mkdir(parents=True, exist_ok=True)
+            study_target.write_bytes(compressed)
+
+            index_target = Path(temp_dir) / self.studies_index_path
+            index_target.parent.mkdir(parents=True, exist_ok=True)
+            index_target.write_bytes(index_content)
+
+            # Remove the old uncompressed variant when overwriting a study
+            # created by version 3.9.2.
+            legacy_target = Path(temp_dir) / self._legacy_study_path(study_id)
+            if legacy_target.exists():
+                legacy_target.unlink()
+
+            self._run_git(
+                ["config", "user.name", "Bike Power Calculator"],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                [
+                    "config",
+                    "user.email",
+                    "bike-power-calculator@users.noreply.github.com",
+                ],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                [
+                    "add",
+                    "-A",
+                    "--",
+                    self.config.normalized_root + "/Studies",
+                ],
+                cwd=temp_dir,
+            )
+
+            status = self._run_git(
+                [
+                    "status",
+                    "--porcelain",
+                    "--",
+                    self.config.normalized_root + "/Studies",
+                ],
+                cwd=temp_dir,
+            )
+            if status.stdout.strip():
+                self._run_git(
+                    ["commit", "-m", f"Save parameter study: {payload['name']}"],
+                    cwd=temp_dir,
+                )
+                self._push_with_retry(temp_dir)
+
         return meta
 
     def load_study(self, study_id: str) -> dict[str, Any]:
-        loaded = self.get_file(self._study_path(study_id))
-        if loaded is not None:
+        raw = self.get_file_raw(self._study_path(study_id))
+        if raw is not None:
             try:
-                return json.loads(gzip.decompress(loaded[0]).decode("utf-8"))
+                return json.loads(gzip.decompress(raw).decode("utf-8"))
             except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise GitHubDatabaseError(
                     f"Studie {study_id} ist beschädigt oder nicht lesbar: {exc}"

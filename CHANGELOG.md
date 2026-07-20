@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.9.2.2
+- Studien speichern jetzt exakt wie Berechnungen per Git-Clone, lokalem Schreiben, einem Commit und Push
+- Studien-Datei und Studienindex werden atomar im selben Commit gespeichert
+- Kein REST-Contents- oder Git-Data-Upload mehr für Studien
+- „Einstellungen laden“ wechselt automatisch zum Rechner und setzt die Widgetwerte erst dort
+- „Alles laden“ übernimmt Settings und Ergebnisse und öffnet anschließend den Rechner
+- Behebt das Entfernen geladener Widgetwerte auf der Datenbankseite durch Streamlit
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.9.2.1
 - GitHub-Studien werden komprimiert gespeichert
 - Große Studien verwenden automatisch die Git-Data-API statt des Contents-Einzelrequests

@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.9.2.1"
+APP_VERSION = "3.9.2.2"
 BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -135,17 +135,25 @@ def sync_widgets_from_config(config: dict[str, Any]) -> None:
 
 
 def queue_loaded_config(config: dict[str, Any]) -> None:
-    """Apply loaded settings safely on the next Streamlit rerun.
+    """Queue settings and open the calculator before creating its widgets.
 
-    Existing widget keys must be removed first, otherwise Streamlit keeps the
-    values from the previously displayed calculator instead of the loaded file.
+    Streamlit removes widget state for widgets that are not rendered in the
+    current run. Therefore loaded calculator values must only be written in a
+    run that actually renders the calculator page.
     """
     normalized = normalize_loaded_config(config)
     st.session_state.config = normalized
     st.session_state.pending_loaded_config = normalized
+    st.session_state.pending_app_main_area = "🚴 Rechner"
 
 
-def apply_pending_loaded_config() -> None:
+def apply_pending_navigation() -> None:
+    pending_area = st.session_state.pop("pending_app_main_area", None)
+    if pending_area:
+        st.session_state["app_main_area"] = pending_area
+
+
+def apply_pending_loaded_config_on_calculator() -> None:
     pending = st.session_state.pop("pending_loaded_config", None)
     if not isinstance(pending, dict):
         return
@@ -4233,7 +4241,9 @@ root_path = "Database"
                         )
                         loaded_config = normalize_loaded_config(settings)
                         queue_loaded_config(loaded_config)
-                        st.success("Einstellungen wurden geladen.")
+                        st.session_state.database_load_message = (
+                            "Einstellungen wurden geladen und im Rechner übernommen."
+                        )
                         st.rerun()
                     except Exception as exc:
                         st.error(f"Einstellungen konnten nicht geladen werden: {exc}")
@@ -4298,10 +4308,12 @@ root_path = "Database"
 
                         loaded_config = normalize_loaded_config(settings)
                         queue_loaded_config(loaded_config)
+                        st.session_state.database_load_message = (
+                            "Berechnung wurde vollständig geladen und im Rechner übernommen."
+                        )
                         st.session_state.result = loaded_result
                         st.session_state.profile = loaded_profile
                         st.session_state.run_log = loaded_log
-                        st.success("Berechnung wurde vollständig geladen.")
                         st.rerun()
                     except Exception as exc:
                         st.error(f"Berechnung konnte nicht geladen werden: {exc}")
@@ -5165,7 +5177,7 @@ def render_analysis_area() -> None:
 
 def main() -> None:
     init_session_state()
-    apply_pending_loaded_config()
+    apply_pending_navigation()
 
     with st.sidebar:
         st.header("Navigation")
@@ -5188,6 +5200,12 @@ def main() -> None:
         )
         render_github_database_sidebar()
         return
+
+    apply_pending_loaded_config_on_calculator()
+
+    flash_message = st.session_state.pop("database_load_message", None)
+    if flash_message:
+        st.success(flash_message)
 
     st.title("🚴 Bike Power Calculator")
     st.caption(
