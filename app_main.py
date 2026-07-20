@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.9.2"
+APP_VERSION = "3.9.2.1"
 BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -132,6 +132,27 @@ def sync_widgets_from_config(config: dict[str, Any]) -> None:
             value = str(value)
 
         st.session_state[key] = value
+
+
+def queue_loaded_config(config: dict[str, Any]) -> None:
+    """Apply loaded settings safely on the next Streamlit rerun.
+
+    Existing widget keys must be removed first, otherwise Streamlit keeps the
+    values from the previously displayed calculator instead of the loaded file.
+    """
+    normalized = normalize_loaded_config(config)
+    st.session_state.config = normalized
+    st.session_state.pending_loaded_config = normalized
+
+
+def apply_pending_loaded_config() -> None:
+    pending = st.session_state.pop("pending_loaded_config", None)
+    if not isinstance(pending, dict):
+        return
+    for field in FIELDS:
+        st.session_state.pop(widget_key(field), None)
+    st.session_state.config = normalize_loaded_config(pending)
+    sync_widgets_from_config(st.session_state.config)
 
 
 def init_session_state() -> None:
@@ -4211,8 +4232,7 @@ root_path = "Database"
                             "settings_snapshot.json",
                         )
                         loaded_config = normalize_loaded_config(settings)
-                        st.session_state.config = loaded_config
-                        sync_widgets_from_config(loaded_config)
+                        queue_loaded_config(loaded_config)
                         st.success("Einstellungen wurden geladen.")
                         st.rerun()
                     except Exception as exc:
@@ -4277,8 +4297,7 @@ root_path = "Database"
                                 settings["Wetterdatei Advanced Weather"] = str(target)
 
                         loaded_config = normalize_loaded_config(settings)
-                        st.session_state.config = loaded_config
-                        sync_widgets_from_config(loaded_config)
+                        queue_loaded_config(loaded_config)
                         st.session_state.result = loaded_result
                         st.session_state.profile = loaded_profile
                         st.session_state.run_log = loaded_log
@@ -5146,6 +5165,7 @@ def render_analysis_area() -> None:
 
 def main() -> None:
     init_session_state()
+    apply_pending_loaded_config()
 
     with st.sidebar:
         st.header("Navigation")
@@ -5189,8 +5209,7 @@ def main() -> None:
                 try:
                     raw_config = json.load(uploaded_json)
                     loaded_config = normalize_loaded_config(raw_config)
-                    st.session_state.config = loaded_config
-                    sync_widgets_from_config(loaded_config)
+                    queue_loaded_config(loaded_config)
                     st.session_state.last_loaded_json_name = uploaded_json.name
                     st.success("JSON-Einstellungen geladen und übernommen.")
                     st.rerun()

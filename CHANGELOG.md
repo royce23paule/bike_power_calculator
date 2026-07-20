@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.9.2.1
+- GitHub-Studien werden komprimiert gespeichert
+- Große Studien verwenden automatisch die Git-Data-API statt des Contents-Einzelrequests
+- Korrekte SHA-Verwendung direkt nach dem erstmaligen Anlegen des Studienindex
+- Rückwärtskompatibles Laden unkomprimierter Studien aus Version 3.9.2
+- Rechner-Widgets werden beim Laden gespeicherter Settings zuverlässig zurückgesetzt
+- „Einstellungen laden“ und „Alles laden“ übernehmen die gespeicherten Eingaben wieder vollständig
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.9.2
 - GitHub-Studienbibliothek für 1D- und 2D-Parameterstudien
 - Studien mit UUID speichern und laden

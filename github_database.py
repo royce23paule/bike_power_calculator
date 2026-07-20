@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import hashlib
+import gzip
 import io
 import zipfile
 import uuid
@@ -1698,6 +1699,9 @@ class GitHubDatabase:
         return f"{self.config.normalized_root}/Studies/index.json"
 
     def _study_path(self, study_id: str) -> str:
+        return f"{self.config.normalized_root}/Studies/{study_id}.study.json.gz"
+
+    def _legacy_study_path(self, study_id: str) -> str:
         return f"{self.config.normalized_root}/Studies/{study_id}.study.json"
 
     def load_studies_index(self) -> tuple[dict[str, Any], str | None]:
@@ -1705,7 +1709,10 @@ class GitHubDatabase:
         if loaded is None:
             index = {"schema_version": 1, "updated_at": datetime.now(timezone.utc).isoformat(), "studies": []}
             self.put_json(self.studies_index_path, index, "Initialize parameter study library")
-            return index, None
+            created = self.get_json(self.studies_index_path)
+            if created is None:
+                raise GitHubDatabaseError("Der Studienindex konnte nicht angelegt werden.")
+            return created[0], created[1]
         index, sha = loaded
         index.setdefault("schema_version", 1)
         index.setdefault("studies", [])
@@ -1729,9 +1736,21 @@ class GitHubDatabase:
         payload["created_at"] = created_at
         payload["updated_at"] = now
         payload["favorite"] = is_favorite
-        loaded = self.get_json(self._study_path(study_id))
-        file_sha = loaded[1] if loaded else None
-        self.put_json(self._study_path(study_id), payload, f"Save parameter study: {payload['name']}", file_sha)
+        study_path = self._study_path(study_id)
+        serialized = json.dumps(
+            payload, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+        compressed = gzip.compress(serialized, compresslevel=9)
+        loaded_file = self.get_file(study_path)
+        file_sha = loaded_file[1] if loaded_file else None
+        message = f"Save parameter study: {payload['name']}"
+        # GitHub's Contents endpoint can return an HTML 400 page for very
+        # large request bodies. Compressed studies normally remain small;
+        # larger ones are written through the Git Data API instead.
+        if len(compressed) > 750_000:
+            self.put_file_via_git_data(study_path, compressed, message)
+        else:
+            self.put_file(study_path, compressed, message, file_sha)
         study = payload.get("study", {}) if isinstance(payload.get("study"), dict) else {}
         meta = {
             "id": study_id, "name": payload["name"], "study_type": payload.get("study_type", ""),
@@ -1745,10 +1764,20 @@ class GitHubDatabase:
         return meta
 
     def load_study(self, study_id: str) -> dict[str, Any]:
-        loaded = self.get_json(self._study_path(study_id))
-        if loaded is None:
+        loaded = self.get_file(self._study_path(study_id))
+        if loaded is not None:
+            try:
+                return json.loads(gzip.decompress(loaded[0]).decode("utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise GitHubDatabaseError(
+                    f"Studie {study_id} ist beschädigt oder nicht lesbar: {exc}"
+                ) from exc
+
+        # Backward compatibility with files created by version 3.9.2.
+        legacy = self.get_json(self._legacy_study_path(study_id))
+        if legacy is None:
             raise GitHubDatabaseError(f"Studie {study_id} wurde nicht gefunden.")
-        return loaded[0]
+        return legacy[0]
 
     def update_study_metadata(self, study_id: str, *, name: str | None = None, favorite: bool | None = None) -> dict[str, Any]:
         payload = self.load_study(study_id)
@@ -1768,6 +1797,7 @@ class GitHubDatabase:
         except GitHubDatabaseError:
             pass
         self.delete_file(self._study_path(study_id), f"Delete parameter study {study_id}")
+        self.delete_file(self._legacy_study_path(study_id), f"Delete legacy parameter study {study_id}")
         index, sha = self.load_studies_index()
         index["studies"] = [item for item in index.get("studies", []) if item.get("id") != study_id]
         index["updated_at"] = datetime.now(timezone.utc).isoformat()
