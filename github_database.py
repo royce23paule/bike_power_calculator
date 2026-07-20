@@ -1693,6 +1693,86 @@ class GitHubDatabase:
         calculations.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return calculations
 
+    @property
+    def studies_index_path(self) -> str:
+        return f"{self.config.normalized_root}/Studies/index.json"
+
+    def _study_path(self, study_id: str) -> str:
+        return f"{self.config.normalized_root}/Studies/{study_id}.study.json"
+
+    def load_studies_index(self) -> tuple[dict[str, Any], str | None]:
+        loaded = self.get_json(self.studies_index_path)
+        if loaded is None:
+            index = {"schema_version": 1, "updated_at": datetime.now(timezone.utc).isoformat(), "studies": []}
+            self.put_json(self.studies_index_path, index, "Initialize parameter study library")
+            return index, None
+        index, sha = loaded
+        index.setdefault("schema_version", 1)
+        index.setdefault("studies", [])
+        return index, sha
+
+    def list_studies(self) -> list[dict[str, Any]]:
+        studies = list(self.load_studies_index()[0].get("studies", []))
+        studies.sort(key=lambda item: (not bool(item.get("favorite")), str(item.get("updated_at", ""))), reverse=False)
+        return studies
+
+    def save_study(self, payload: dict[str, Any], *, name: str, study_id: str | None = None, favorite: bool | None = None) -> dict[str, Any]:
+        study_id = study_id or uuid.uuid4().hex
+        now = datetime.now(timezone.utc).isoformat()
+        index, index_sha = self.load_studies_index()
+        existing = next((item for item in index.get("studies", []) if item.get("id") == study_id), None)
+        created_at = str(existing.get("created_at")) if existing else now
+        is_favorite = bool(existing.get("favorite")) if favorite is None and existing else bool(favorite)
+        payload = dict(payload)
+        payload["study_id"] = study_id
+        payload["name"] = name.strip() or "Parameterstudie"
+        payload["created_at"] = created_at
+        payload["updated_at"] = now
+        payload["favorite"] = is_favorite
+        loaded = self.get_json(self._study_path(study_id))
+        file_sha = loaded[1] if loaded else None
+        self.put_json(self._study_path(study_id), payload, f"Save parameter study: {payload['name']}", file_sha)
+        study = payload.get("study", {}) if isinstance(payload.get("study"), dict) else {}
+        meta = {
+            "id": study_id, "name": payload["name"], "study_type": payload.get("study_type", ""),
+            "favorite": is_favorite, "created_at": created_at, "updated_at": now,
+            "parameter": study.get("parameter", ""), "x_parameter": study.get("x_parameter", ""),
+            "y_parameter": study.get("y_parameter", ""), "run_count": len(study.get("runs", [])),
+        }
+        index["studies"] = [item for item in index.get("studies", []) if item.get("id") != study_id] + [meta]
+        index["updated_at"] = now
+        self.put_json(self.studies_index_path, index, f"Update study library: {payload['name']}", index_sha)
+        return meta
+
+    def load_study(self, study_id: str) -> dict[str, Any]:
+        loaded = self.get_json(self._study_path(study_id))
+        if loaded is None:
+            raise GitHubDatabaseError(f"Studie {study_id} wurde nicht gefunden.")
+        return loaded[0]
+
+    def update_study_metadata(self, study_id: str, *, name: str | None = None, favorite: bool | None = None) -> dict[str, Any]:
+        payload = self.load_study(study_id)
+        return self.save_study(payload, name=name if name is not None else str(payload.get("name", "Parameterstudie")), study_id=study_id, favorite=favorite)
+
+    def duplicate_study(self, study_id: str, *, name: str) -> dict[str, Any]:
+        payload = self.load_study(study_id)
+        payload.pop("study_id", None)
+        payload.pop("created_at", None)
+        payload.pop("updated_at", None)
+        return self.save_study(payload, name=name, favorite=False)
+
+    def delete_study(self, study_id: str) -> None:
+        payload = None
+        try:
+            payload = self.load_study(study_id)
+        except GitHubDatabaseError:
+            pass
+        self.delete_file(self._study_path(study_id), f"Delete parameter study {study_id}")
+        index, sha = self.load_studies_index()
+        index["studies"] = [item for item in index.get("studies", []) if item.get("id") != study_id]
+        index["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self.put_json(self.studies_index_path, index, f"Update study library: delete {study_id}", sha)
+
     def find_events_by_name(self, name: str) -> list[dict[str, Any]]:
         normalized = name.strip().casefold()
         return [

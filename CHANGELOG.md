@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.9.2
+- GitHub-Studienbibliothek für 1D- und 2D-Parameterstudien
+- Studien mit UUID speichern und laden
+- Studien umbenennen, duplizieren, favorisieren und löschen
+- Zentraler Index unter Database/Studies/index.json
+- Lokaler JSON-Import und -Export bleibt erhalten
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.9.1
 - Vollständige 1D- und 2D-Parameterstudien als JSON speichern
 - Gespeicherte Studien wieder laden und automatisch dem richtigen Studientyp zuordnen

@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.9.1"
+APP_VERSION = "3.9.2"
 BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -159,6 +159,10 @@ def init_session_state() -> None:
         st.session_state.parameter_study_2d = None
     if "parameter_study_import_message" not in st.session_state:
         st.session_state.parameter_study_import_message = None
+    if "github_study_selected_id" not in st.session_state:
+        st.session_state.github_study_selected_id = None
+    if "github_study_message" not in st.session_state:
+        st.session_state.github_study_message = None
 
 
 def config_to_json_bytes(config: dict[str, Any]) -> bytes:
@@ -246,6 +250,115 @@ def _validate_loaded_study(raw: Any) -> tuple[str, dict[str, Any], str]:
     return study_type, study, name
 
 
+def _load_study_into_session(raw: dict[str, Any], source_label: str = "") -> tuple[str, str]:
+    loaded_type, loaded_study, loaded_name = _validate_loaded_study(raw)
+    if loaded_type == "1D":
+        st.session_state.parameter_study = loaded_study
+        st.session_state.parameter_study_pending_type = "1D – ein Parameter"
+    else:
+        st.session_state.parameter_study_2d = loaded_study
+        st.session_state.parameter_study_pending_type = "2D – zwei Parameter"
+    st.session_state.parameter_study_import_message = f"Studie ‚{loaded_name}‘ ({loaded_type}) wurde {source_label or 'geladen'}."
+    return loaded_type, loaded_name
+
+
+def render_parameter_study_github_controls(study: dict[str, Any] | None, current_type: str, name: str) -> None:
+    db = get_github_database()
+    with st.expander("☁️ GitHub-Studienbibliothek", expanded=True):
+        if db is None:
+            st.info("Die GitHub-Datenbank ist nicht konfiguriert. Der lokale JSON-Export bleibt verfügbar.")
+            return
+        try:
+            studies = db.list_studies()
+        except GitHubDatabaseError as exc:
+            st.error(f"Studienbibliothek konnte nicht geladen werden: {exc}")
+            return
+
+        save_col, refresh_col = st.columns([3, 1])
+        with save_col:
+            selected_id = st.session_state.get("github_study_selected_id")
+            overwrite = bool(selected_id and any(item.get("id") == selected_id for item in studies))
+            label = "Ausgewählte GitHub-Studie aktualisieren" if overwrite else "Als neue GitHub-Studie speichern"
+            if st.button(label, use_container_width=True, disabled=not (isinstance(study, dict) and study.get("runs")), key=f"github_study_save_{current_type}"):
+                try:
+                    payload = _study_export_payload(study, current_type, name)
+                    meta = db.save_study(payload, name=name, study_id=selected_id if overwrite else None)
+                    st.session_state.github_study_selected_id = meta["id"]
+                    st.session_state.github_study_message = f"Studie ‚{meta['name']}‘ wurde auf GitHub gespeichert."
+                    st.rerun()
+                except (GitHubDatabaseError, ValueError, TypeError) as exc:
+                    st.error(f"Speichern fehlgeschlagen: {exc}")
+        with refresh_col:
+            if st.button("Aktualisieren", use_container_width=True, key="github_study_refresh"):
+                st.rerun()
+
+        if not studies:
+            st.caption("Noch keine Studien auf GitHub gespeichert.")
+            return
+
+        search = st.text_input("Studien durchsuchen", key="github_study_search").strip().casefold()
+        filtered = [item for item in studies if not search or search in str(item.get("name", "")).casefold() or search in str(item.get("parameter", "")).casefold() or search in str(item.get("x_parameter", "")).casefold() or search in str(item.get("y_parameter", "")).casefold()]
+        labels = {}
+        for item in filtered:
+            star = "⭐ " if item.get("favorite") else ""
+            axes = item.get("parameter") or " × ".join(v for v in [item.get("x_parameter"), item.get("y_parameter")] if v)
+            labels[item["id"]] = f"{star}{item.get('name','Parameterstudie')} · {item.get('study_type','')} · {axes}"
+        if not labels:
+            st.info("Keine passende Studie gefunden.")
+            return
+        ids=list(labels)
+        selected_id=st.session_state.get("github_study_selected_id")
+        index=ids.index(selected_id) if selected_id in ids else 0
+        chosen=st.selectbox("Gespeicherte Studie", ids, index=index, format_func=lambda value: labels[value], key="github_study_selector")
+        st.session_state.github_study_selected_id=chosen
+        meta=next(item for item in filtered if item.get("id")==chosen)
+        st.caption(f"{meta.get('run_count',0)} Simulationen · geändert {str(meta.get('updated_at',''))[:19].replace('T',' ')}")
+
+        c1,c2,c3=st.columns(3)
+        if c1.button("Laden", type="primary", use_container_width=True, key=f"github_study_load_{chosen}"):
+            try:
+                raw=db.load_study(chosen)
+                _load_study_into_session(raw, "aus GitHub geladen")
+                st.rerun()
+            except (GitHubDatabaseError, ValueError) as exc:
+                st.error(f"Laden fehlgeschlagen: {exc}")
+        if c2.button("Favorit entfernen" if meta.get("favorite") else "Favorisieren", use_container_width=True, key=f"github_study_favorite_{chosen}"):
+            try:
+                db.update_study_metadata(chosen, favorite=not bool(meta.get("favorite")))
+                st.rerun()
+            except GitHubDatabaseError as exc:
+                st.error(f"Änderung fehlgeschlagen: {exc}")
+        if c3.button("Duplizieren", use_container_width=True, key=f"github_study_duplicate_{chosen}"):
+            try:
+                copied=db.duplicate_study(chosen, name=f"{meta.get('name','Parameterstudie')} – Kopie")
+                st.session_state.github_study_selected_id=copied["id"]
+                st.rerun()
+            except GitHubDatabaseError as exc:
+                st.error(f"Duplizieren fehlgeschlagen: {exc}")
+
+        rename_col, delete_col=st.columns(2)
+        new_name=rename_col.text_input("Neuer Name", value=str(meta.get("name", "")), key=f"github_study_rename_name_{chosen}")
+        if rename_col.button("Umbenennen", use_container_width=True, key=f"github_study_rename_{chosen}"):
+            try:
+                db.update_study_metadata(chosen, name=new_name)
+                st.rerun()
+            except GitHubDatabaseError as exc:
+                st.error(f"Umbenennen fehlgeschlagen: {exc}")
+        confirm=delete_col.checkbox("Löschen bestätigen", key=f"github_study_delete_confirm_{chosen}")
+        if delete_col.button("Studie löschen", use_container_width=True, disabled=not confirm, key=f"github_study_delete_{chosen}"):
+            try:
+                db.delete_study(chosen)
+                st.session_state.github_study_selected_id=None
+                st.rerun()
+            except GitHubDatabaseError as exc:
+                st.error(f"Löschen fehlgeschlagen: {exc}")
+
+        message=st.session_state.get("github_study_message")
+        if message:
+            st.success(message)
+            st.session_state.github_study_message=None
+
+
 def render_parameter_study_file_controls() -> None:
     st.markdown("### 💾 Studien speichern und laden")
     st.caption(
@@ -284,6 +397,8 @@ def render_parameter_study_file_controls() -> None:
         else:
             st.info(f"Noch keine {current_type}-Studie zum Speichern vorhanden.")
 
+    render_parameter_study_github_controls(study, current_type, name)
+
     with right:
         uploaded = st.file_uploader(
             "Gespeicherte Studie laden",
@@ -300,16 +415,7 @@ def render_parameter_study_file_controls() -> None:
             ):
                 try:
                     raw = json.loads(uploaded.getvalue().decode("utf-8-sig"))
-                    loaded_type, loaded_study, loaded_name = _validate_loaded_study(raw)
-                    if loaded_type == "1D":
-                        st.session_state.parameter_study = loaded_study
-                        st.session_state.parameter_study_pending_type = "1D – ein Parameter"
-                    else:
-                        st.session_state.parameter_study_2d = loaded_study
-                        st.session_state.parameter_study_pending_type = "2D – zwei Parameter"
-                    st.session_state.parameter_study_import_message = (
-                        f"Studie ‚{loaded_name}‘ ({loaded_type}) wurde geladen."
-                    )
+                    _load_study_into_session(raw)
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Studie konnte nicht geladen werden: {exc}")
