@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.9.2.4
+- Einheitlicher aktiver Studienzustand für neue, lokale und aus GitHub geladene Studien
+- Geladene 1D-/2D-Studie bestimmt unmittelbar den angezeigten Studientyp
+- Radio-Widget-State wird beim Laden kontrolliert neu initialisiert
+- Speicher-, Export- und Ergebnisanzeige lesen dieselbe aktive Studie
+- Verhindert Erfolgsmeldung ohne sichtbare Studienergebnisse
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.9.2.3
 - GitHub-Aktionen „Als neue Studie speichern“ und „Ausgewählte aktualisieren“ klar getrennt
 - Nach dem ersten Speichern oder Laden können beliebig weitere Studien neu gespeichert werden

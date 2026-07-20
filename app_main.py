@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.9.2.3"
+APP_VERSION = "3.9.2.4"
 BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -186,6 +186,10 @@ def init_session_state() -> None:
         st.session_state.parameter_study = None
     if "parameter_study_2d" not in st.session_state:
         st.session_state.parameter_study_2d = None
+    if "active_parameter_study" not in st.session_state:
+        st.session_state.active_parameter_study = None
+    if "active_parameter_study_type" not in st.session_state:
+        st.session_state.active_parameter_study_type = None
     if "parameter_study_import_message" not in st.session_state:
         st.session_state.parameter_study_import_message = None
     if "github_study_selected_id" not in st.session_state:
@@ -279,6 +283,39 @@ def _validate_loaded_study(raw: Any) -> tuple[str, dict[str, Any], str]:
     return study_type, study, name
 
 
+def set_active_parameter_study(
+    study_type: str,
+    study: dict[str, Any],
+    *,
+    github_study_id: str | None = None,
+) -> None:
+    """Set the single active study used by controls and result rendering."""
+    normalized_type = "2D" if str(study_type).upper().startswith("2") else "1D"
+    if normalized_type == "1D":
+        st.session_state.parameter_study = study
+    else:
+        st.session_state.parameter_study_2d = study
+    st.session_state.active_parameter_study = study
+    st.session_state.active_parameter_study_type = normalized_type
+    st.session_state.github_study_selected_id = github_study_id
+    st.session_state.parameter_study_pending_type = (
+        "2D – zwei Parameter" if normalized_type == "2D" else "1D – ein Parameter"
+    )
+
+
+def get_active_parameter_study() -> tuple[str, dict[str, Any] | None]:
+    active_type = str(st.session_state.get("active_parameter_study_type") or "")
+    active = st.session_state.get("active_parameter_study")
+    if active_type in {"1D", "2D"} and isinstance(active, dict):
+        return active_type, active
+
+    selected = str(st.session_state.get("parameter_study_type", "1D – ein Parameter"))
+    fallback_type = "2D" if selected.startswith("2D") else "1D"
+    fallback_key = "parameter_study_2d" if fallback_type == "2D" else "parameter_study"
+    fallback = st.session_state.get(fallback_key)
+    return fallback_type, fallback if isinstance(fallback, dict) else None
+
+
 def _load_study_into_session(
     raw: dict[str, Any],
     source_label: str = "",
@@ -286,13 +323,11 @@ def _load_study_into_session(
     github_study_id: str | None = None,
 ) -> tuple[str, str]:
     loaded_type, loaded_study, loaded_name = _validate_loaded_study(raw)
-    st.session_state.github_study_selected_id = github_study_id
-    if loaded_type == "1D":
-        st.session_state.parameter_study = loaded_study
-        st.session_state.parameter_study_pending_type = "1D – ein Parameter"
-    else:
-        st.session_state.parameter_study_2d = loaded_study
-        st.session_state.parameter_study_pending_type = "2D – zwei Parameter"
+    set_active_parameter_study(
+        loaded_type,
+        loaded_study,
+        github_study_id=github_study_id,
+    )
     st.session_state.parameter_study_import_message = f"Studie ‚{loaded_name}‘ ({loaded_type}) wurde {source_label or 'geladen'}."
     return loaded_type, loaded_name
 
@@ -455,9 +490,7 @@ def render_parameter_study_file_controls() -> None:
         "Referenzwerten, Konfigurationen und Simulationsergebnissen."
     )
 
-    current_type = "2D" if str(st.session_state.get("parameter_study_type", "")).startswith("2D") else "1D"
-    state_key = "parameter_study_2d" if current_type == "2D" else "parameter_study"
-    study = st.session_state.get(state_key)
+    current_type, study = get_active_parameter_study()
 
     left, right = st.columns(2)
     with left:
@@ -1451,8 +1484,7 @@ def render_parameter_study_1d() -> None:
                     text=f"{index + 1} von {len(values)} Simulationen abgeschlossen",
                 )
 
-            st.session_state.github_study_selected_id = None
-            st.session_state.parameter_study = {
+            new_study = {
                 "id": str(uuid.uuid4()),
                 "name": f"{parameter_name} {start:g}–{end:g} {unit}".strip(),
                 "created_at": started_at,
@@ -1466,6 +1498,7 @@ def render_parameter_study_1d() -> None:
                 "reference_value": reference_raw,
                 "runs": study_runs,
             }
+            set_active_parameter_study("1D", new_study, github_study_id=None)
             status.success("Parameterstudie abgeschlossen.")
         except Exception as exc:
             progress.empty()
@@ -1747,8 +1780,7 @@ def render_parameter_study_2d() -> None:
                     summary["Y-Wert"] = y_value
                     runs.append({"x_value": x_value, "y_value": y_value, "config": config, "result": result, "summary": summary})
                     progress.progress(int(index / total * 100), text=f"{index} von {total} Simulationen abgeschlossen")
-            st.session_state.github_study_selected_id = None
-            st.session_state.parameter_study_2d = {
+            new_study = {
                 "id": str(uuid.uuid4()), "created_at": datetime.now().isoformat(timespec="seconds"),
                 "name": f"{x_name} × {y_name}",
                 "study_schema_version": 1, "source_app_version": APP_VERSION,
@@ -1759,6 +1791,7 @@ def render_parameter_study_2d() -> None:
                 "x_reference_value": x_reference, "y_reference_value": y_reference,
                 "runs": runs,
             }
+            set_active_parameter_study("2D", new_study, github_study_id=None)
             status.success("2D-Parameterstudie abgeschlossen.")
         except Exception as exc:
             progress.empty(); status.empty()
@@ -1777,6 +1810,9 @@ def render_parameter_study_2d() -> None:
 def render_parameter_study() -> None:
     pending_type = st.session_state.pop("parameter_study_pending_type", None)
     if pending_type in {"1D – ein Parameter", "2D – zwei Parameter"}:
+        # The radio widget may already have existed in a previous run. Remove
+        # its widget state before assigning the type of the loaded study.
+        st.session_state.pop("parameter_study_type", None)
         st.session_state.parameter_study_type = pending_type
 
     study_type = st.radio(
@@ -1785,11 +1821,31 @@ def render_parameter_study() -> None:
         horizontal=True,
         key="parameter_study_type",
     )
+
+    requested_type = "2D" if study_type.startswith("2D") else "1D"
+    active_type = st.session_state.get("active_parameter_study_type")
+    if active_type != requested_type:
+        requested_key = (
+            "parameter_study_2d" if requested_type == "2D" else "parameter_study"
+        )
+        requested_study = st.session_state.get(requested_key)
+        st.session_state.active_parameter_study_type = requested_type
+        st.session_state.active_parameter_study = (
+            requested_study if isinstance(requested_study, dict) else None
+        )
+        st.session_state.github_study_selected_id = None
+
     render_parameter_study_file_controls()
     st.divider()
-    if study_type.startswith("1D"):
+
+    active_type, active_study = get_active_parameter_study()
+    if active_type == "1D":
+        if isinstance(active_study, dict) and active_study.get("runs"):
+            st.session_state.parameter_study = active_study
         render_parameter_study_1d()
     else:
+        if isinstance(active_study, dict) and active_study.get("runs"):
+            st.session_state.parameter_study_2d = active_study
         render_parameter_study_2d()
 
 
