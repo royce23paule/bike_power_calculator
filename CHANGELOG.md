@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.9.2.3
+- GitHub-Aktionen „Als neue Studie speichern“ und „Ausgewählte aktualisieren“ klar getrennt
+- Nach dem ersten Speichern oder Laden können beliebig weitere Studien neu gespeichert werden
+- Neue 1D- und 2D-Berechnungen lösen automatisch die Verknüpfung zur zuvor ausgewählten GitHub-Studie
+- Lokaler JSON-Import wird als eigenständige Studie behandelt
+- GitHub-Laden behält die Verknüpfung für gezielte Aktualisierungen
+- Neue Funktion „Auswahl lösen“
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.9.2.2
 - Studien speichern jetzt exakt wie Berechnungen per Git-Clone, lokalem Schreiben, einem Commit und Push
 - Studien-Datei und Studienindex werden atomar im selben Commit gespeichert

@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.9.2.2"
+APP_VERSION = "3.9.2.3"
 BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -279,8 +279,14 @@ def _validate_loaded_study(raw: Any) -> tuple[str, dict[str, Any], str]:
     return study_type, study, name
 
 
-def _load_study_into_session(raw: dict[str, Any], source_label: str = "") -> tuple[str, str]:
+def _load_study_into_session(
+    raw: dict[str, Any],
+    source_label: str = "",
+    *,
+    github_study_id: str | None = None,
+) -> tuple[str, str]:
     loaded_type, loaded_study, loaded_name = _validate_loaded_study(raw)
+    st.session_state.github_study_selected_id = github_study_id
     if loaded_type == "1D":
         st.session_state.parameter_study = loaded_study
         st.session_state.parameter_study_pending_type = "1D – ein Parameter"
@@ -303,22 +309,64 @@ def render_parameter_study_github_controls(study: dict[str, Any] | None, current
             st.error(f"Studienbibliothek konnte nicht geladen werden: {exc}")
             return
 
-        save_col, refresh_col = st.columns([3, 1])
-        with save_col:
-            selected_id = st.session_state.get("github_study_selected_id")
-            overwrite = bool(selected_id and any(item.get("id") == selected_id for item in studies))
-            label = "Ausgewählte GitHub-Studie aktualisieren" if overwrite else "Als neue GitHub-Studie speichern"
-            if st.button(label, use_container_width=True, disabled=not (isinstance(study, dict) and study.get("runs")), key=f"github_study_save_{current_type}"):
+        selected_id = st.session_state.get("github_study_selected_id")
+        selected_exists = bool(
+            selected_id
+            and any(item.get("id") == selected_id for item in studies)
+        )
+        can_save = bool(isinstance(study, dict) and study.get("runs"))
+
+        save_new_col, update_col, refresh_col = st.columns([2, 2, 1])
+        with save_new_col:
+            if st.button(
+                "Als neue Studie speichern",
+                use_container_width=True,
+                disabled=not can_save,
+                key=f"github_study_save_new_{current_type}",
+            ):
                 try:
                     payload = _study_export_payload(study, current_type, name)
-                    meta = db.save_study(payload, name=name, study_id=selected_id if overwrite else None)
+                    meta = db.save_study(payload, name=name, study_id=None)
                     st.session_state.github_study_selected_id = meta["id"]
-                    st.session_state.github_study_message = f"Studie ‚{meta['name']}‘ wurde auf GitHub gespeichert."
+                    st.session_state.github_study_message = (
+                        f"Neue Studie ‚{meta['name']}‘ wurde auf GitHub gespeichert."
+                    )
                     st.rerun()
                 except (GitHubDatabaseError, ValueError, TypeError) as exc:
                     st.error(f"Speichern fehlgeschlagen: {exc}")
+
+        with update_col:
+            if st.button(
+                "Ausgewählte aktualisieren",
+                use_container_width=True,
+                disabled=not (can_save and selected_exists),
+                key=f"github_study_update_{current_type}",
+                help=(
+                    "Überschreibt die aktuell in der Bibliothek ausgewählte Studie. "
+                    "Für eine zusätzliche Studie bitte „Als neue Studie speichern“ verwenden."
+                ),
+            ):
+                try:
+                    payload = _study_export_payload(study, current_type, name)
+                    meta = db.save_study(
+                        payload,
+                        name=name,
+                        study_id=selected_id,
+                    )
+                    st.session_state.github_study_selected_id = meta["id"]
+                    st.session_state.github_study_message = (
+                        f"Studie ‚{meta['name']}‘ wurde aktualisiert."
+                    )
+                    st.rerun()
+                except (GitHubDatabaseError, ValueError, TypeError) as exc:
+                    st.error(f"Aktualisieren fehlgeschlagen: {exc}")
+
         with refresh_col:
-            if st.button("Aktualisieren", use_container_width=True, key="github_study_refresh"):
+            if st.button(
+                "Neu laden",
+                use_container_width=True,
+                key="github_study_refresh",
+            ):
                 st.rerun()
 
         if not studies:
@@ -342,12 +390,24 @@ def render_parameter_study_github_controls(study: dict[str, Any] | None, current
         st.session_state.github_study_selected_id=chosen
         meta=next(item for item in filtered if item.get("id")==chosen)
         st.caption(f"{meta.get('run_count',0)} Simulationen · geändert {str(meta.get('updated_at',''))[:19].replace('T',' ')}")
+        if st.button(
+            "Auswahl lösen",
+            use_container_width=True,
+            key=f"github_study_clear_selection_{chosen}",
+            help="Die aktuelle Studie bleibt geöffnet, wird aber nicht mehr mit einer bestehenden GitHub-Studie verknüpft.",
+        ):
+            st.session_state.github_study_selected_id = None
+            st.rerun()
 
         c1,c2,c3=st.columns(3)
         if c1.button("Laden", type="primary", use_container_width=True, key=f"github_study_load_{chosen}"):
             try:
                 raw=db.load_study(chosen)
-                _load_study_into_session(raw, "aus GitHub geladen")
+                _load_study_into_session(
+                    raw,
+                    "aus GitHub geladen",
+                    github_study_id=chosen,
+                )
                 st.rerun()
             except (GitHubDatabaseError, ValueError) as exc:
                 st.error(f"Laden fehlgeschlagen: {exc}")
@@ -1391,6 +1451,7 @@ def render_parameter_study_1d() -> None:
                     text=f"{index + 1} von {len(values)} Simulationen abgeschlossen",
                 )
 
+            st.session_state.github_study_selected_id = None
             st.session_state.parameter_study = {
                 "id": str(uuid.uuid4()),
                 "name": f"{parameter_name} {start:g}–{end:g} {unit}".strip(),
@@ -1686,6 +1747,7 @@ def render_parameter_study_2d() -> None:
                     summary["Y-Wert"] = y_value
                     runs.append({"x_value": x_value, "y_value": y_value, "config": config, "result": result, "summary": summary})
                     progress.progress(int(index / total * 100), text=f"{index} von {total} Simulationen abgeschlossen")
+            st.session_state.github_study_selected_id = None
             st.session_state.parameter_study_2d = {
                 "id": str(uuid.uuid4()), "created_at": datetime.now().isoformat(timespec="seconds"),
                 "name": f"{x_name} × {y_name}",
