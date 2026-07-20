@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.8.1"
+APP_VERSION = "3.8.2"
 BUILD_DATE = "2026-07-14"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -397,6 +397,8 @@ PARAMETER_STUDY_DEFINITIONS: dict[str, dict[str, Any]] = {
         "max": 0.60,
         "format": "%.3f",
         "min_step": 0.0001,
+        "sensitivity_step": 0.001,
+        "sensitivity_label": "0,001 m²",
     },
     "Leistung bei 0 % Steigung": {
         "field": "Leistung bei 0% Steigung [W]",
@@ -408,6 +410,8 @@ PARAMETER_STUDY_DEFINITIONS: dict[str, dict[str, Any]] = {
         "max": 1000.0,
         "format": "%.1f",
         "min_step": 0.1,
+        "sensitivity_step": 1.0,
+        "sensitivity_label": "1 W",
     },
     "Fahrergewicht": {
         "field": "Gewicht Fahrer [kg]",
@@ -419,6 +423,8 @@ PARAMETER_STUDY_DEFINITIONS: dict[str, dict[str, Any]] = {
         "max": 250.0,
         "format": "%.1f",
         "min_step": 0.1,
+        "sensitivity_step": 1.0,
+        "sensitivity_label": "1 kg",
     },
     "Rollwiderstand Crr": {
         "field": "Rollwiderstand cr [-]",
@@ -430,6 +436,8 @@ PARAMETER_STUDY_DEFINITIONS: dict[str, dict[str, Any]] = {
         "max": 0.0200,
         "format": "%.5f",
         "min_step": 0.00001,
+        "sensitivity_step": 0.0001,
+        "sensitivity_label": "0,0001",
     },
 }
 
@@ -603,6 +611,128 @@ def _parameter_study_insight(
     return statement
 
 
+
+def _parameter_study_sensitivity(
+    study: dict[str, Any],
+    frame: pd.DataFrame,
+) -> tuple[float | None, str]:
+    valid = frame.dropna(subset=["Wert", "Zeit [s]"]).sort_values("Wert")
+    if len(valid) < 2:
+        return None, ""
+
+    x = valid["Wert"].to_numpy(dtype=float)
+    y = valid["Zeit [s]"].to_numpy(dtype=float)
+    if np.ptp(x) <= 1e-12:
+        return None, ""
+
+    slope = float(np.polyfit(x, y, 1)[0])
+    definition = study.get("definition", {})
+    sensitivity_step = float(definition.get("sensitivity_step", 1.0))
+    label = str(
+        definition.get(
+            "sensitivity_label",
+            definition.get("unit", "Parametereinheit"),
+        )
+    )
+    return slope * sensitivity_step, label
+
+
+def _parameter_study_insights(
+    study: dict[str, Any],
+    frame: pd.DataFrame,
+) -> list[str]:
+    valid = frame.dropna(subset=["Wert", "Zeit [s]"]).sort_values("Wert")
+    if len(valid) < 2:
+        return [
+            "Für automatische Kernaussagen werden mindestens zwei gültige Studienpunkte benötigt."
+        ]
+
+    parameter = str(study.get("parameter", "Parameter"))
+    definition = study.get("definition", {})
+    unit = str(definition.get("unit", ""))
+    x = valid["Wert"].to_numpy(dtype=float)
+    y = valid["Zeit [s]"].to_numpy(dtype=float)
+
+    statements = [_parameter_study_insight(study, frame)]
+
+    if len(valid) >= 3 and np.ptp(x) > 1e-12:
+        coefficients = np.polyfit(x, y, 1)
+        predicted = np.polyval(coefficients, x)
+        residual_sum = float(np.sum((y - predicted) ** 2))
+        total_sum = float(np.sum((y - np.mean(y)) ** 2))
+        r_squared = 1.0 - residual_sum / total_sum if total_sum > 1e-12 else 1.0
+
+        if r_squared >= 0.995:
+            statements.append(
+                f"Der Zusammenhang zwischen {parameter} und Fahrzeit ist im "
+                f"untersuchten Bereich nahezu linear (R² = {r_squared:.3f})."
+            )
+        elif r_squared >= 0.98:
+            statements.append(
+                f"Der Zusammenhang ist weitgehend linear, zeigt aber bereits "
+                f"leichte Krümmung (R² = {r_squared:.3f})."
+            )
+        else:
+            statements.append(
+                f"Der Zusammenhang ist deutlich nichtlinear (R² = {r_squared:.3f}); "
+                "ein einzelner Durchschnittswert beschreibt ihn nur eingeschränkt."
+            )
+
+        local_slopes = np.diff(y) / np.diff(x)
+        if len(local_slopes) >= 2:
+            first_abs = abs(float(local_slopes[0]))
+            last_abs = abs(float(local_slopes[-1]))
+            if first_abs > 1e-12:
+                ratio = last_abs / first_abs
+                if ratio < 0.75:
+                    statements.append(
+                        "Der zusätzliche Zeiteffekt wird zum oberen Ende des "
+                        "untersuchten Bereichs deutlich kleiner."
+                    )
+                elif ratio > 1.25:
+                    statements.append(
+                        "Der zusätzliche Zeiteffekt wird zum oberen Ende des "
+                        "untersuchten Bereichs deutlich größer."
+                    )
+
+    best = valid.loc[valid["Zeit [s]"].idxmin()]
+    worst = valid.loc[valid["Zeit [s]"].idxmax()]
+    statements.append(
+        f"Zwischen der schnellsten Variante ({best['Wert']:g} {unit}) und der "
+        f"langsamsten Variante ({worst['Wert']:g} {unit}) liegen "
+        f"{format_duration(float(worst['Zeit [s]'] - best['Zeit [s]']))}."
+    )
+    return statements
+
+
+def _add_reference_marker(
+    fig: go.Figure,
+    reference_row: pd.Series | None,
+    *,
+    y_column: str,
+    name: str = "Referenz",
+) -> None:
+    if reference_row is None:
+        return
+    y_value = reference_row.get(y_column)
+    if y_value is None or pd.isna(y_value):
+        return
+    fig.add_trace(
+        go.Scatter(
+            x=[float(reference_row["Wert"])],
+            y=[float(y_value)],
+            mode="markers",
+            name=name,
+            marker={"symbol": "star", "size": 16},
+            hovertemplate=(
+                "<b>Referenz</b><br>"
+                "Parameter: %{x:g}<br>"
+                "Wert: %{y:.2f}<extra></extra>"
+            ),
+        )
+    )
+
+
 def render_parameter_study_analysis(study: dict[str, Any]) -> None:
     frame, _ = _parameter_study_analysis_frame(study)
     if frame.empty:
@@ -625,8 +755,11 @@ def render_parameter_study_analysis(study: dict[str, Any]) -> None:
         reference_row = None
 
     unit = str(study.get("definition", {}).get("unit", ""))
+    parameter = str(study.get("parameter", "Parameter"))
     total_gain = float(worst_row["Zeit [s]"] - best_row["Zeit [s]"])
-    kpis = st.columns(4)
+    sensitivity_seconds, sensitivity_label = _parameter_study_sensitivity(study, frame)
+
+    kpis = st.columns(5)
     kpis[0].metric(
         "Schnellste Variante",
         f"{best_row['Wert']:g} {unit}".strip(),
@@ -640,48 +773,100 @@ def render_parameter_study_analysis(study: dict[str, Any]) -> None:
             help="Nächstgelegener Studienpunkt zum aktuellen Rechnerwert.",
         )
         best_gain = float(reference_row["Zeit [s]"] - best_row["Zeit [s]"])
-        kpis[2].metric("Bestes Ergebnis vs. Referenz", _format_signed_duration(-best_gain))
+        kpis[2].metric(
+            "Bestes Ergebnis vs. Referenz",
+            _format_signed_duration(-best_gain),
+        )
     else:
         kpis[1].metric("Referenzpunkt", "—")
         kpis[2].metric("Bestes Ergebnis vs. Referenz", "—")
     kpis[3].metric("Spannweite der Fahrzeit", format_duration(total_gain))
+    if sensitivity_seconds is not None:
+        kpis[4].metric(
+            f"Effekt je {sensitivity_label}",
+            _format_signed_duration(sensitivity_seconds),
+            help=(
+                "Mittlere lineare Sensitivität über den gesamten untersuchten Bereich. "
+                "Positiv bedeutet längere, negativ kürzere Fahrzeit."
+            ),
+        )
+    else:
+        kpis[4].metric("Sensitivität", "—")
 
-    st.info(_parameter_study_insight(study, frame))
+    with st.expander("Automatische Kernaussagen", expanded=True):
+        for statement in _parameter_study_insights(study, frame):
+            st.markdown(f"- {statement}")
 
     tabs = st.tabs(["Fahrzeit", "Geschwindigkeit", "Leistung", "Tabelle"])
-    parameter = str(study.get("parameter", "Parameter"))
+
+    hover_columns = [
+        "Zeit",
+        "Differenz zur Referenz [s]",
+        "Ø Geschwindigkeit [km/h]",
+        "Average Power [W]",
+        "Normalized Power [W]",
+    ]
+    hover_frame = frame.copy()
+    for column in hover_columns:
+        if column not in hover_frame:
+            hover_frame[column] = np.nan
+    customdata = hover_frame[hover_columns].to_numpy()
 
     with tabs[0]:
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=frame["Wert"], y=frame["Zeit [s]"] / 60.0,
-            mode="lines+markers", name="Fahrzeit",
-            customdata=frame[["Zeit"]].to_numpy(),
+            x=frame["Wert"],
+            y=frame["Zeit [s]"] / 60.0,
+            mode="lines+markers",
+            name="Fahrzeit",
+            customdata=customdata,
             hovertemplate=(
-                f"{parameter}: %{{x:g}} {unit}<br>"
-                "Fahrzeit: %{customdata[0]}<extra></extra>"
+                f"<b>{parameter}: %{{x:g}} {unit}</b><br>"
+                "Fahrzeit: %{customdata[0]}<br>"
+                "Δ Referenz: %{customdata[1]:+.0f} s<br>"
+                "Ø Geschwindigkeit: %{customdata[2]:.2f} km/h<br>"
+                "AP: %{customdata[3]:.1f} W<br>"
+                "NP: %{customdata[4]:.1f} W"
+                "<extra></extra>"
             ),
         ))
         if reference_row is not None:
+            reference_for_minutes = reference_row.copy()
+            reference_for_minutes["Zeit [min]"] = float(reference_row["Zeit [s]"]) / 60.0
+            _add_reference_marker(
+                fig,
+                reference_for_minutes,
+                y_column="Zeit [min]",
+            )
             fig.add_vline(
-                x=float(reference_row["Wert"]), line_dash="dash",
-                annotation_text="Referenz", annotation_position="top",
+                x=float(reference_row["Wert"]),
+                line_dash="dash",
+                annotation_text="Referenz",
+                annotation_position="top",
             )
         fig.update_layout(
             xaxis_title=f"{parameter} [{unit}]" if unit else parameter,
             yaxis_title="Fahrzeit [min]",
-            hovermode="x unified",
+            hovermode="closest",
         )
-        st.plotly_chart(fig, use_container_width=True, key="parameter_study_time_chart")
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key="parameter_study_time_chart",
+        )
 
         if "Zeitgewinn zur Referenz [s]" in frame:
             gain_fig = go.Figure(go.Bar(
                 x=frame["Wert"],
                 y=frame["Zeitgewinn zur Referenz [s]"] / 60.0,
                 name="Zeitgewinn",
+                customdata=customdata,
                 hovertemplate=(
-                    f"{parameter}: %{{x:g}} {unit}<br>"
-                    "Zeitgewinn: %{y:.2f} min<extra></extra>"
+                    f"<b>{parameter}: %{{x:g}} {unit}</b><br>"
+                    "Zeitgewinn: %{y:.2f} min<br>"
+                    "Fahrzeit: %{customdata[0]}<br>"
+                    "Ø Geschwindigkeit: %{customdata[2]:.2f} km/h"
+                    "<extra></extra>"
                 ),
             ))
             gain_fig.add_hline(y=0)
@@ -689,40 +874,94 @@ def render_parameter_study_analysis(study: dict[str, Any]) -> None:
                 xaxis_title=f"{parameter} [{unit}]" if unit else parameter,
                 yaxis_title="Zeitgewinn zur Referenz [min]",
             )
-            st.plotly_chart(gain_fig, use_container_width=True, key="parameter_study_gain_chart")
+            st.plotly_chart(
+                gain_fig,
+                use_container_width=True,
+                key="parameter_study_gain_chart",
+            )
 
     with tabs[1]:
         if "Ø Geschwindigkeit [km/h]" in frame:
             fig = go.Figure(go.Scatter(
-                x=frame["Wert"], y=frame["Ø Geschwindigkeit [km/h]"],
-                mode="lines+markers", name="Ø Geschwindigkeit",
+                x=frame["Wert"],
+                y=frame["Ø Geschwindigkeit [km/h]"],
+                mode="lines+markers",
+                name="Ø Geschwindigkeit",
+                customdata=customdata,
+                hovertemplate=(
+                    f"<b>{parameter}: %{{x:g}} {unit}</b><br>"
+                    "Ø Geschwindigkeit: %{y:.2f} km/h<br>"
+                    "Fahrzeit: %{customdata[0]}<br>"
+                    "Δ Referenz: %{customdata[1]:+.0f} s"
+                    "<extra></extra>"
+                ),
             ))
+            _add_reference_marker(
+                fig,
+                reference_row,
+                y_column="Ø Geschwindigkeit [km/h]",
+            )
             if reference_row is not None:
                 fig.add_vline(x=float(reference_row["Wert"]), line_dash="dash")
             fig.update_layout(
                 xaxis_title=f"{parameter} [{unit}]" if unit else parameter,
                 yaxis_title="Ø Geschwindigkeit [km/h]",
             )
-            st.plotly_chart(fig, use_container_width=True, key="parameter_study_speed_chart")
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                key="parameter_study_speed_chart",
+            )
 
     with tabs[2]:
         fig = go.Figure()
         if "Average Power [W]" in frame:
             fig.add_trace(go.Scatter(
-                x=frame["Wert"], y=frame["Average Power [W]"],
-                mode="lines+markers", name="AP",
+                x=frame["Wert"],
+                y=frame["Average Power [W]"],
+                mode="lines+markers",
+                name="AP",
+                customdata=customdata,
+                hovertemplate=(
+                    f"<b>{parameter}: %{{x:g}} {unit}</b><br>"
+                    "AP: %{y:.1f} W<br>"
+                    "NP: %{customdata[4]:.1f} W<br>"
+                    "Fahrzeit: %{customdata[0]}"
+                    "<extra></extra>"
+                ),
             ))
         if "Normalized Power [W]" in frame:
             fig.add_trace(go.Scatter(
-                x=frame["Wert"], y=frame["Normalized Power [W]"],
-                mode="lines+markers", name="NP",
+                x=frame["Wert"],
+                y=frame["Normalized Power [W]"],
+                mode="lines+markers",
+                name="NP",
+                customdata=customdata,
+                hovertemplate=(
+                    f"<b>{parameter}: %{{x:g}} {unit}</b><br>"
+                    "NP: %{y:.1f} W<br>"
+                    "AP: %{customdata[3]:.1f} W<br>"
+                    "Fahrzeit: %{customdata[0]}"
+                    "<extra></extra>"
+                ),
             ))
+        if reference_row is not None:
+            fig.add_vline(
+                x=float(reference_row["Wert"]),
+                line_dash="dash",
+                annotation_text="Referenz",
+                annotation_position="top",
+            )
         fig.update_layout(
             xaxis_title=f"{parameter} [{unit}]" if unit else parameter,
             yaxis_title="Leistung [W]",
-            hovermode="x unified",
+            hovermode="closest",
         )
-        st.plotly_chart(fig, use_container_width=True, key="parameter_study_power_chart")
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key="parameter_study_power_chart",
+        )
 
     with tabs[3]:
         display_frame = frame.copy()
@@ -730,6 +969,11 @@ def render_parameter_study_analysis(study: dict[str, Any]) -> None:
             display_frame["Differenz zur Referenz"] = display_frame[
                 "Differenz zur Referenz [s]"
             ].apply(_format_signed_duration)
+        if reference_row is not None:
+            display_frame["Referenz"] = np.isclose(
+                display_frame["Wert"].astype(float),
+                float(reference_row["Wert"]),
+            )
         st.dataframe(display_frame, use_container_width=True, hide_index=True)
         st.download_button(
             "Studienergebnisse als CSV herunterladen",
@@ -798,7 +1042,7 @@ def render_parameter_study() -> None:
     st.metric("Anzahl Simulationen", len(values))
     if len(values) > 25:
         st.error(
-            "In Version 3.8.1 sind maximal 25 Simulationen pro Studie erlaubt. "
+            "In Version 3.8.2 sind maximal 25 Simulationen pro Studie erlaubt. "
             "Bitte Bereich oder Schrittweite anpassen."
         )
         return

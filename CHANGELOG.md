@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.8.2
+- Deutlich sichtbare Referenzmarkierung als Stern in den Studiendiagrammen
+- Erweiterte Hover-Informationen mit Fahrzeit, Referenzdifferenz, Geschwindigkeit, AP und NP
+- Sensitivitäts-KPI mit sinnvoller Einheit je Parameter
+- Automatische Kernaussagen zu Linearität, Zeitspannweite und verändertem Grenznutzen
+- Referenzpunkt wird in der Ergebnistabelle gekennzeichnet
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.8.1
 - Referenzorientierte Auswertung von Parameterstudien
 - KPI-Karten für schnellste Variante, Referenzpunkt, Referenzdifferenz und Zeitspannweite
