@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.10.0"
+APP_VERSION = "3.10.0.1"
 BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -199,7 +199,13 @@ def init_session_state() -> None:
 
 
 def config_to_json_bytes(config: dict[str, Any]) -> bytes:
-    return json.dumps(config, ensure_ascii=False, indent=2).encode("utf-8")
+    """Serialize configurations containing NumPy/Pandas widget values safely."""
+    return json.dumps(
+        _study_json_safe(config),
+        ensure_ascii=False,
+        indent=2,
+        allow_nan=False,
+    ).encode("utf-8")
 
 
 def _study_json_safe(value: Any) -> Any:

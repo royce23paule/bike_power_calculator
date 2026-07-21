@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.10.0.1
+- Fehler beim zweiten Berechnungslauf behoben
+- Konfigurationsdownload serialisiert NumPy-, Pandas-, Datums- und Pfadwerte rekursiv in JSON-kompatible Python-Typen
+- Nicht endliche Fließkommawerte werden sicher als `null` exportiert
+- Keine Änderung an Berechnung oder Pacing-Optimierung
+
+
 ## 3.10.0
 - Erweiterte Pacing-Optimierung nur bei positivem NP-Sollwert und mindestens zwei unterschiedlichen Maximalleistungen
 - Strukturierte Einzelergebnisse je getesteter Maximalleistung im Rechenkern
