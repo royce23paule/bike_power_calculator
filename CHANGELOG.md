@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.9.4.1
+- Neu berechnete 1D- und 2D-Studien werden nach Abschluss sofort angezeigt
+- Nach der Berechnung erfolgt ein gezielter Rerun mit sichtbarer Abschlussmeldung
+- Explizite, praxisgerechte Schrittweiten für die +/- Bedienelemente aller Zahlenfelder
+- Kleine Werte wie Rollwiderstand und CdA erhalten feinere Schritte
+- Leistung, Gewicht, Steigung, Wetter und Filter erhalten passende Schritte
+- Gepufferte Eingabe aus Version 3.9.4 bleibt erhalten
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.9.4
 - Sämtliche Rechner-Eingabefelder in ein gepuffertes Streamlit-Formular verschoben
 - Zahlenwerte können nacheinander geändert werden, ohne nach jeder Eingabe die Seite neu zu laden

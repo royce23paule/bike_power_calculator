@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.9.4"
+APP_VERSION = "3.9.4.1"
 BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -759,6 +759,43 @@ def resolve_repository_path(path_value: str) -> str:
 
     return path_value
 
+def _number_input_step(field: dict[str, Any], value: Any) -> float:
+    """Choose a practical explicit step for Streamlit +/- controls."""
+    name = str(field.get("name", "")).casefold()
+    try:
+        numeric_value = abs(float(value))
+    except Exception:
+        numeric_value = 0.0
+
+    if "rollwiderstand" in name:
+        return 0.0001
+    if "cda" in name:
+        return 0.01
+    if "wirkungsgrad" in name:
+        return 0.1
+    if "abschwaechung" in name or "abschattung" in name:
+        return 0.05
+    if "temperatur" in name:
+        return 0.5
+    if "gewicht" in name:
+        return 0.5
+    if "leistung" in name or "[w]" in name:
+        return 1.0
+    if "steigung" in name or "[%]" in name:
+        return 0.5
+    if "windrichtung" in name:
+        return 5.0
+    if "windgeschwindigkeit" in name:
+        return 1.0
+    if numeric_value < 0.01:
+        return 0.0001
+    if numeric_value < 1:
+        return 0.01
+    if numeric_value < 10:
+        return 0.1
+    return 1.0
+
+
 def render_field(field: dict[str, Any], config: dict[str, Any]) -> Any:
     name = field["name"]
     value = config.get(name, field["default"])
@@ -784,7 +821,13 @@ def render_field(field: dict[str, Any], config: dict[str, Any]) -> Any:
                 st.session_state[key] = float(value)
             except Exception:
                 st.session_state[key] = float(field["default"])
-        return st.number_input(name, help=help_text, key=key, format="%.6g")
+        return st.number_input(
+            name,
+            help=help_text,
+            key=key,
+            format="%.6g",
+            step=_number_input_step(field, st.session_state[key]),
+        )
 
     if key not in st.session_state:
         st.session_state[key] = str(value)
@@ -1692,7 +1735,10 @@ def render_parameter_study_1d() -> None:
                 "runs": study_runs,
             }
             set_active_parameter_study("1D", new_study, github_study_id=None)
-            status.success("Parameterstudie abgeschlossen.")
+            st.session_state.parameter_study_calculation_message = (
+                "1D-Parameterstudie abgeschlossen."
+            )
+            st.rerun()
         except Exception as exc:
             progress.empty()
             status.empty()
@@ -1987,7 +2033,10 @@ def render_parameter_study_2d() -> None:
                 "runs": runs,
             }
             set_active_parameter_study("2D", new_study, github_study_id=None)
-            status.success("2D-Parameterstudie abgeschlossen.")
+            st.session_state.parameter_study_calculation_message = (
+                "2D-Parameterstudie abgeschlossen."
+            )
+            st.rerun()
         except Exception as exc:
             progress.empty(); status.empty()
             st.error(f"2D-Parameterstudie abgebrochen: {exc}")
@@ -2004,6 +2053,13 @@ def render_parameter_study_2d() -> None:
 
 
 def render_parameter_study() -> None:
+    calculation_message = st.session_state.pop(
+        "parameter_study_calculation_message",
+        None,
+    )
+    if calculation_message:
+        st.success(calculation_message)
+
     pending_type = st.session_state.pop("parameter_study_pending_type", None)
     if pending_type in {"1D – ein Parameter", "2D – zwei Parameter"}:
         # The radio widget may already have existed in a previous run. Remove
