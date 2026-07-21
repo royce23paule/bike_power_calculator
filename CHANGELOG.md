@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.9.4
+- Sämtliche Rechner-Eingabefelder in ein gepuffertes Streamlit-Formular verschoben
+- Zahlenwerte können nacheinander geändert werden, ohne nach jeder Eingabe die Seite neu zu laden
+- Neuer Button „Einstellungen übernehmen“
+- „Berechnung starten“ übernimmt alle geänderten Werte automatisch
+- PDF-, HTML- und Wetteroptionen werden ebenfalls gemeinsam übernommen
+- Datei-Uploads bleiben weiterhin unmittelbar wirksam
+- Ergebnisdiagramme werden während der Eingabe nicht mehrfach neu aufgebaut
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.9.3
 - Suche nach Studienname, Studientyp und Parametern
 - Sortierung nach Favoriten, Änderungsdatum, Erstellungsdatum, Name oder Studientyp

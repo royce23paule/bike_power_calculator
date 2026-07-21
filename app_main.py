@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.9.3"
+APP_VERSION = "3.9.4"
 BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -5594,61 +5594,118 @@ def main() -> None:
             else:
                 st.success(f"Wetter-CSV geladen: {weather_file.name}")
 
-    tab_keys = ["basis", "aero", "leistung", "wetter", "strecke", "ausgabe"]
-    tabs = st.tabs([GROUP_TITLES[key] for key in tab_keys])
-
-    updated = {}
-    for tab, group_key in zip(tabs, tab_keys):
-        with tab:
-            updated.update(render_group(group_key, config))
-
+    # Datei-Uploads bleiben sofort wirksam. Die übrigen Rechnerwerte werden
+    # dagegen gesammelt und erst beim Absenden des Formulars übernommen.
     if route_path:
-        updated["GPX/FIT Datei"] = route_path
+        st.session_state.config["GPX/FIT Datei"] = route_path
     if weather_path:
-        updated["Wetterdatei Advanced Weather"] = weather_path
+        st.session_state.config["Wetterdatei Advanced Weather"] = weather_path
 
-    st.session_state.config = normalize_loaded_config(updated)
+    # Gepufferte Eingabe: Änderungen innerhalb des Formulars verursachen
+    # keinen vollständigen Streamlit-Rerun. Erst einer der beiden Buttons
+    # übernimmt alle Werte gemeinsam.
+    with st.form("calculator_settings_form", clear_on_submit=False):
+        tab_keys = ["basis", "aero", "leistung", "wetter", "strecke", "ausgabe"]
+        tabs = st.tabs([GROUP_TITLES[key] for key in tab_keys])
 
-    st.divider()
+        updated = {}
+        for tab, group_key in zip(tabs, tab_keys):
+            with tab:
+                updated.update(render_group(group_key, config))
 
-    st.subheader("Ausgabe")
-    out_col1, out_col2 = st.columns(2)
-    with out_col1:
-        st.session_state.generate_pdf = st.checkbox(
-            "PDF erzeugen",
-            value=st.session_state.generate_pdf,
-            help="Ausschalten spart typischerweise mehrere Sekunden. Download und PDF-Vorschau entfallen dann.",
+        if route_path:
+            updated["GPX/FIT Datei"] = route_path
+        elif config.get("GPX/FIT Datei"):
+            updated["GPX/FIT Datei"] = config.get("GPX/FIT Datei")
+
+        if weather_path:
+            updated["Wetterdatei Advanced Weather"] = weather_path
+        elif config.get("Wetterdatei Advanced Weather"):
+            updated["Wetterdatei Advanced Weather"] = config.get(
+                "Wetterdatei Advanced Weather"
+            )
+
+        st.divider()
+        st.subheader("Ausgabe")
+        out_col1, out_col2 = st.columns(2)
+        with out_col1:
+            generate_pdf_value = st.checkbox(
+                "PDF erzeugen",
+                value=st.session_state.generate_pdf,
+                help=(
+                    "Ausschalten spart typischerweise mehrere Sekunden. "
+                    "Download und PDF-Vorschau entfallen dann."
+                ),
+                key="calculator_form_generate_pdf",
+            )
+        with out_col2:
+            generate_html_value = st.checkbox(
+                "HTML-Karte erzeugen",
+                value=st.session_state.generate_html_map,
+                help=(
+                    "Ausschalten spart etwas Zeit. "
+                    "Die interaktiven Diagramme bleiben erhalten."
+                ),
+                key="calculator_form_generate_html",
+            )
+
+        weather_mode = str(
+            updated.get(
+                "Verwendung Advanced Weather",
+                config.get("Verwendung Advanced Weather", ""),
+            )
         )
-    with out_col2:
-        st.session_state.generate_html_map = st.checkbox(
-            "HTML-Karte erzeugen",
-            value=st.session_state.generate_html_map,
-            help="Ausschalten spart etwas Zeit. Die interaktiven Diagramme bleiben erhalten.",
+        if weather_mode.startswith("True,True"):
+            refresh_weather_value = st.checkbox(
+                "Online-Wetter neu laden",
+                value=False,
+                help=(
+                    "Löscht vor dieser Berechnung den lokalen Open-Meteo-Cache. "
+                    "Ohne Haken werden identische Abfragen bis zu 30 Tage "
+                    "wiederverwendet."
+                ),
+                key="calculator_form_refresh_weather",
+            )
+        else:
+            refresh_weather_value = False
+
+        st.caption(
+            "Mehrere Werte können nacheinander geändert werden. "
+            "Die Seite wird erst nach einem der beiden Buttons neu aufgebaut."
         )
 
-    weather_mode = str(st.session_state.config.get("Verwendung Advanced Weather", ""))
-    if weather_mode.startswith("True,True"):
-        st.session_state.refresh_weather_cache = st.checkbox(
-            "Online-Wetter neu laden",
-            value=False,
-            help=(
-                "Löscht vor dieser Berechnung den lokalen Open-Meteo-Cache. "
-                "Ohne Haken werden identische Abfragen bis zu 30 Tage wiederverwendet."
-            ),
+        apply_col, run_col = st.columns(2)
+        with apply_col:
+            apply_clicked = st.form_submit_button(
+                "Einstellungen übernehmen",
+                use_container_width=True,
+            )
+        with run_col:
+            start_clicked = st.form_submit_button(
+                "Berechnung starten",
+                type="primary",
+                use_container_width=True,
+            )
+
+    if apply_clicked or start_clicked:
+        st.session_state.config = normalize_loaded_config(updated)
+        st.session_state.generate_pdf = bool(generate_pdf_value)
+        st.session_state.generate_html_map = bool(generate_html_value)
+        st.session_state.refresh_weather_cache = bool(refresh_weather_value)
+
+    if apply_clicked and not start_clicked:
+        st.success("Einstellungen wurden übernommen.")
+
+    if st.session_state.generate_pdf or st.session_state.generate_html_map:
+        st.info(
+            "Die Berechnung erzeugt die ausgewählten Ausgaben. "
+            "Für schnelle Tests kannst du PDF/Karte deaktivieren."
         )
     else:
-        st.session_state.refresh_weather_cache = False
-
-    run_col, info_col = st.columns([1, 2])
-
-    with run_col:
-        start_clicked = st.button("Berechnung starten", type="primary", use_container_width=True)
-
-    with info_col:
-        if st.session_state.generate_pdf or st.session_state.generate_html_map:
-            st.info("Die Berechnung erzeugt die ausgewählten Ausgaben. Für schnelle Tests kannst du PDF/Karte deaktivieren.")
-        else:
-            st.info("Schnellmodus aktiv: Es werden nur Berechnung und interaktive Diagramme erzeugt.")
+        st.info(
+            "Schnellmodus aktiv: Es werden nur Berechnung und "
+            "interaktive Diagramme erzeugt."
+        )
 
     if start_clicked:
         if not st.session_state.config.get("GPX/FIT Datei"):
