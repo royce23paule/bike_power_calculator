@@ -1895,18 +1895,120 @@ class GitHubDatabase:
         payload.pop("updated_at", None)
         return self.save_study(payload, name=name, favorite=False)
 
+    def delete_studies(self, study_ids: list[str]) -> int:
+        """Delete multiple studies and update the index in one Git commit."""
+        normalized_ids = list(
+            dict.fromkeys(
+                str(study_id).strip()
+                for study_id in study_ids
+                if str(study_id).strip()
+            )
+        )
+        if not normalized_ids:
+            return 0
+
+        index, _ = self.load_studies_index()
+        existing_ids = {
+            str(item.get("id", ""))
+            for item in index.get("studies", [])
+        }
+        ids_to_delete = [
+            study_id
+            for study_id in normalized_ids
+            if study_id in existing_ids
+        ]
+        if not ids_to_delete:
+            return 0
+
+        now = datetime.now(timezone.utc).isoformat()
+        delete_set = set(ids_to_delete)
+        index["studies"] = [
+            item
+            for item in index.get("studies", [])
+            if str(item.get("id", "")) not in delete_set
+        ]
+        index["updated_at"] = now
+
+        repository_url = (
+            f"https://github.com/{self.config.owner}/{self.config.repo}.git"
+        )
+        with tempfile.TemporaryDirectory(
+            prefix="bike-power-delete-studies-"
+        ) as temp_dir:
+            self._run_git(
+                [
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--branch",
+                    self.config.branch,
+                    repository_url,
+                    temp_dir,
+                ],
+                timeout_s=180,
+            )
+
+            for study_id in ids_to_delete:
+                for relative_path in (
+                    self._study_path(study_id),
+                    self._legacy_study_path(study_id),
+                ):
+                    target = Path(temp_dir) / relative_path
+                    if target.exists():
+                        target.unlink()
+
+            index_target = Path(temp_dir) / self.studies_index_path
+            index_target.parent.mkdir(parents=True, exist_ok=True)
+            index_target.write_text(
+                json.dumps(index, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+            self._run_git(
+                ["config", "user.name", "Bike Power Calculator"],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                [
+                    "config",
+                    "user.email",
+                    "bike-power-calculator@users.noreply.github.com",
+                ],
+                cwd=temp_dir,
+            )
+            self._run_git(
+                [
+                    "add",
+                    "-A",
+                    "--",
+                    self.config.normalized_root + "/Studies",
+                ],
+                cwd=temp_dir,
+            )
+            status = self._run_git(
+                [
+                    "status",
+                    "--porcelain",
+                    "--",
+                    self.config.normalized_root + "/Studies",
+                ],
+                cwd=temp_dir,
+            )
+            if status.stdout.strip():
+                self._run_git(
+                    [
+                        "commit",
+                        "-m",
+                        f"Delete {len(ids_to_delete)} parameter study/studies",
+                    ],
+                    cwd=temp_dir,
+                )
+                self._push_with_retry(temp_dir)
+
+        return len(ids_to_delete)
+
     def delete_study(self, study_id: str) -> None:
-        payload = None
-        try:
-            payload = self.load_study(study_id)
-        except GitHubDatabaseError:
-            pass
-        self.delete_file(self._study_path(study_id), f"Delete parameter study {study_id}")
-        self.delete_file(self._legacy_study_path(study_id), f"Delete legacy parameter study {study_id}")
-        index, sha = self.load_studies_index()
-        index["studies"] = [item for item in index.get("studies", []) if item.get("id") != study_id]
-        index["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self.put_json(self.studies_index_path, index, f"Update study library: delete {study_id}", sha)
+        self.delete_studies([study_id])
 
     def find_events_by_name(self, name: str) -> list[dict[str, Any]]:
         normalized = name.strip().casefold()

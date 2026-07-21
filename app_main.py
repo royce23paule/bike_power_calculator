@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.9.2.5"
+APP_VERSION = "3.9.3"
 BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -332,12 +332,20 @@ def _load_study_into_session(
     return loaded_type, loaded_name
 
 
-def render_parameter_study_github_controls(study: dict[str, Any] | None, current_type: str, name: str) -> None:
+def render_parameter_study_github_controls(
+    study: dict[str, Any] | None,
+    current_type: str,
+    name: str,
+) -> None:
     db = get_github_database()
     with st.expander("☁️ GitHub-Studienbibliothek", expanded=True):
         if db is None:
-            st.info("Die GitHub-Datenbank ist nicht konfiguriert. Der lokale JSON-Export bleibt verfügbar.")
+            st.info(
+                "Die GitHub-Datenbank ist nicht konfiguriert. "
+                "Der lokale JSON-Export bleibt verfügbar."
+            )
             return
+
         try:
             studies = db.list_studies()
         except GitHubDatabaseError as exc:
@@ -377,7 +385,7 @@ def render_parameter_study_github_controls(study: dict[str, Any] | None, current
                 disabled=not (can_save and selected_exists),
                 key=f"github_study_update_{current_type}",
                 help=(
-                    "Überschreibt die aktuell in der Bibliothek ausgewählte Studie. "
+                    "Überschreibt die aktuell ausgewählte GitHub-Studie. "
                     "Für eine zusätzliche Studie bitte „Als neue Studie speichern“ verwenden."
                 ),
             ):
@@ -404,40 +412,119 @@ def render_parameter_study_github_controls(study: dict[str, Any] | None, current
             ):
                 st.rerun()
 
+        message = st.session_state.get("github_study_message")
+        if message:
+            st.success(message)
+            st.session_state.github_study_message = None
+
         if not studies:
             st.caption("Noch keine Studien auf GitHub gespeichert.")
             return
 
-        search = st.text_input("Studien durchsuchen", key="github_study_search").strip().casefold()
-        filtered = [item for item in studies if not search or search in str(item.get("name", "")).casefold() or search in str(item.get("parameter", "")).casefold() or search in str(item.get("x_parameter", "")).casefold() or search in str(item.get("y_parameter", "")).casefold()]
-        labels = {}
-        for item in filtered:
-            star = "⭐ " if item.get("favorite") else ""
-            axes = item.get("parameter") or " × ".join(v for v in [item.get("x_parameter"), item.get("y_parameter")] if v)
-            labels[item["id"]] = f"{star}{item.get('name','Parameterstudie')} · {item.get('study_type','')} · {axes}"
-        if not labels:
+        st.markdown("#### Bibliothek")
+        filter_col, sort_col, direction_col = st.columns([3, 2, 1.4])
+        search = filter_col.text_input(
+            "Suchen",
+            key="github_study_search",
+            placeholder="Name oder Parameter",
+        ).strip().casefold()
+        sort_mode = sort_col.selectbox(
+            "Sortieren nach",
+            ["Favoriten", "Änderungsdatum", "Erstellungsdatum", "Name", "Studientyp"],
+            key="github_study_sort_mode",
+        )
+        descending = direction_col.selectbox(
+            "Reihenfolge",
+            ["Absteigend", "Aufsteigend"],
+            key="github_study_sort_direction",
+        ) == "Absteigend"
+
+        filtered = [
+            item
+            for item in studies
+            if (
+                not search
+                or search in str(item.get("name", "")).casefold()
+                or search in str(item.get("parameter", "")).casefold()
+                or search in str(item.get("x_parameter", "")).casefold()
+                or search in str(item.get("y_parameter", "")).casefold()
+                or search in str(item.get("study_type", "")).casefold()
+            )
+        ]
+
+        def sort_value(item: dict[str, Any]) -> Any:
+            if sort_mode == "Name":
+                return str(item.get("name", "")).casefold()
+            if sort_mode == "Studientyp":
+                return (
+                    str(item.get("study_type", "")).casefold(),
+                    str(item.get("name", "")).casefold(),
+                )
+            if sort_mode == "Erstellungsdatum":
+                return str(item.get("created_at", ""))
+            if sort_mode == "Änderungsdatum":
+                return str(item.get("updated_at", ""))
+            return (
+                bool(item.get("favorite")),
+                str(item.get("updated_at", "")),
+            )
+
+        filtered.sort(key=sort_value, reverse=descending)
+
+        if not filtered:
             st.info("Keine passende Studie gefunden.")
             return
-        ids=list(labels)
-        selected_id=st.session_state.get("github_study_selected_id")
-        index=ids.index(selected_id) if selected_id in ids else 0
-        chosen=st.selectbox("Gespeicherte Studie", ids, index=index, format_func=lambda value: labels[value], key="github_study_selector")
-        st.session_state.github_study_selected_id=chosen
-        meta=next(item for item in filtered if item.get("id")==chosen)
-        st.caption(f"{meta.get('run_count',0)} Simulationen · geändert {str(meta.get('updated_at',''))[:19].replace('T',' ')}")
-        if st.button(
-            "Auswahl lösen",
-            use_container_width=True,
-            key=f"github_study_clear_selection_{chosen}",
-            help="Die aktuelle Studie bleibt geöffnet, wird aber nicht mehr mit einer bestehenden GitHub-Studie verknüpft.",
-        ):
-            st.session_state.github_study_selected_id = None
-            st.rerun()
 
-        c1,c2,c3=st.columns(3)
-        if c1.button("Laden", type="primary", use_container_width=True, key=f"github_study_load_{chosen}"):
+        labels: dict[str, str] = {}
+        for item in filtered:
+            star = "⭐ " if item.get("favorite") else ""
+            axes = item.get("parameter") or " × ".join(
+                value
+                for value in [
+                    item.get("x_parameter"),
+                    item.get("y_parameter"),
+                ]
+                if value
+            )
+            labels[item["id"]] = (
+                f"{star}{item.get('name', 'Parameterstudie')} · "
+                f"{item.get('study_type', '')} · {axes}"
+            )
+
+        ids = list(labels)
+        selector_key = "github_study_selector_v393"
+        stored_selector = st.session_state.get(selector_key)
+        preferred_id = st.session_state.get("github_study_selected_id")
+        if stored_selector not in ids:
+            st.session_state[selector_key] = (
+                preferred_id if preferred_id in ids else ids[0]
+            )
+
+        chosen = st.selectbox(
+            "Gespeicherte Studie",
+            ids,
+            format_func=lambda value: labels[value],
+            key=selector_key,
+        )
+        st.session_state.github_study_selected_id = chosen
+        meta = next(item for item in filtered if item.get("id") == chosen)
+
+        changed_at = str(meta.get("updated_at", ""))[:19].replace("T", " ")
+        created_at = str(meta.get("created_at", ""))[:19].replace("T", " ")
+        st.caption(
+            f"{meta.get('run_count', 0)} Simulationen · "
+            f"erstellt {created_at or '—'} · geändert {changed_at or '—'}"
+        )
+
+        action_1, action_2, action_3, action_4 = st.columns(4)
+        if action_1.button(
+            "Laden",
+            type="primary",
+            use_container_width=True,
+            key=f"github_study_load_{chosen}",
+        ):
             try:
-                raw=db.load_study(chosen)
+                raw = db.load_study(chosen)
                 _load_study_into_session(
                     raw,
                     "aus GitHub geladen",
@@ -446,42 +533,133 @@ def render_parameter_study_github_controls(study: dict[str, Any] | None, current
                 st.rerun()
             except (GitHubDatabaseError, ValueError) as exc:
                 st.error(f"Laden fehlgeschlagen: {exc}")
-        if c2.button("Favorit entfernen" if meta.get("favorite") else "Favorisieren", use_container_width=True, key=f"github_study_favorite_{chosen}"):
+
+        favorite_label = (
+            "Favorit entfernen" if meta.get("favorite") else "Favorisieren"
+        )
+        if action_2.button(
+            favorite_label,
+            use_container_width=True,
+            key=f"github_study_favorite_{chosen}",
+        ):
             try:
-                db.update_study_metadata(chosen, favorite=not bool(meta.get("favorite")))
+                db.update_study_metadata(
+                    chosen,
+                    favorite=not bool(meta.get("favorite")),
+                )
                 st.rerun()
             except GitHubDatabaseError as exc:
                 st.error(f"Änderung fehlgeschlagen: {exc}")
-        if c3.button("Duplizieren", use_container_width=True, key=f"github_study_duplicate_{chosen}"):
+
+        if action_3.button(
+            "Duplizieren",
+            use_container_width=True,
+            key=f"github_study_duplicate_{chosen}",
+        ):
             try:
-                copied=db.duplicate_study(chosen, name=f"{meta.get('name','Parameterstudie')} – Kopie")
-                st.session_state.github_study_selected_id=copied["id"]
+                copied = db.duplicate_study(
+                    chosen,
+                    name=f"{meta.get('name', 'Parameterstudie')} – Kopie",
+                )
+                st.session_state.github_study_selected_id = copied["id"]
+                st.session_state[selector_key] = copied["id"]
+                st.session_state.github_study_message = (
+                    f"Studie wurde als ‚{copied['name']}‘ dupliziert."
+                )
                 st.rerun()
             except GitHubDatabaseError as exc:
                 st.error(f"Duplizieren fehlgeschlagen: {exc}")
 
-        rename_col, delete_col=st.columns(2)
-        new_name=rename_col.text_input("Neuer Name", value=str(meta.get("name", "")), key=f"github_study_rename_name_{chosen}")
-        if rename_col.button("Umbenennen", use_container_width=True, key=f"github_study_rename_{chosen}"):
+        if action_4.button(
+            "Auswahl lösen",
+            use_container_width=True,
+            key=f"github_study_clear_selection_{chosen}",
+            help=(
+                "Die aktuelle Studie bleibt geöffnet, wird aber nicht mehr "
+                "mit einer bestehenden GitHub-Studie verknüpft."
+            ),
+        ):
+            st.session_state.github_study_selected_id = None
+            st.session_state.pop(selector_key, None)
+            st.rerun()
+
+        st.markdown("#### Bearbeiten")
+        rename_col, single_delete_col = st.columns(2)
+        new_name = rename_col.text_input(
+            "Neuer Name",
+            value=str(meta.get("name", "")),
+            key=f"github_study_rename_name_{chosen}",
+        )
+        if rename_col.button(
+            "Umbenennen",
+            use_container_width=True,
+            disabled=not new_name.strip(),
+            key=f"github_study_rename_{chosen}",
+        ):
             try:
-                db.update_study_metadata(chosen, name=new_name)
+                renamed = db.update_study_metadata(
+                    chosen,
+                    name=new_name.strip(),
+                )
+                st.session_state.github_study_message = (
+                    f"Studie wurde in ‚{renamed['name']}‘ umbenannt."
+                )
                 st.rerun()
             except GitHubDatabaseError as exc:
                 st.error(f"Umbenennen fehlgeschlagen: {exc}")
-        confirm=delete_col.checkbox("Löschen bestätigen", key=f"github_study_delete_confirm_{chosen}")
-        if delete_col.button("Studie löschen", use_container_width=True, disabled=not confirm, key=f"github_study_delete_{chosen}"):
+
+        confirm_single = single_delete_col.checkbox(
+            "Löschen bestätigen",
+            key=f"github_study_delete_confirm_{chosen}",
+        )
+        if single_delete_col.button(
+            "Ausgewählte Studie löschen",
+            use_container_width=True,
+            disabled=not confirm_single,
+            key=f"github_study_delete_{chosen}",
+        ):
             try:
-                db.delete_study(chosen)
-                st.session_state.github_study_selected_id=None
+                db.delete_studies([chosen])
+                st.session_state.github_study_selected_id = None
+                st.session_state.pop(selector_key, None)
+                st.session_state.github_study_message = "Studie wurde gelöscht."
                 st.rerun()
             except GitHubDatabaseError as exc:
                 st.error(f"Löschen fehlgeschlagen: {exc}")
 
-        message=st.session_state.get("github_study_message")
-        if message:
-            st.success(message)
-            st.session_state.github_study_message=None
-
+        with st.expander("Mehrere Studien auswählen und löschen"):
+            multi_ids = st.multiselect(
+                "Studien",
+                ids,
+                format_func=lambda value: labels[value],
+                key="github_study_bulk_delete_selection",
+            )
+            confirm_bulk = st.checkbox(
+                f"{len(multi_ids)} Studie(n) endgültig löschen",
+                key="github_study_bulk_delete_confirm",
+                disabled=not multi_ids,
+            )
+            if st.button(
+                "Ausgewählte Studien löschen",
+                use_container_width=True,
+                disabled=not (multi_ids and confirm_bulk),
+                key="github_study_bulk_delete",
+            ):
+                try:
+                    deleted_count = db.delete_studies(multi_ids)
+                    if st.session_state.get(
+                        "github_study_selected_id"
+                    ) in multi_ids:
+                        st.session_state.github_study_selected_id = None
+                    st.session_state.pop(selector_key, None)
+                    st.session_state.github_study_bulk_delete_selection = []
+                    st.session_state.github_study_bulk_delete_confirm = False
+                    st.session_state.github_study_message = (
+                        f"{deleted_count} Studie(n) wurden gelöscht."
+                    )
+                    st.rerun()
+                except GitHubDatabaseError as exc:
+                    st.error(f"Mehrfachlöschen fehlgeschlagen: {exc}")
 
 def render_parameter_study_file_controls() -> None:
     st.markdown("### 💾 Studien speichern und laden")

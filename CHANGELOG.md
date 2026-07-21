@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.9.3
+- Suche nach Studienname, Studientyp und Parametern
+- Sortierung nach Favoriten, Änderungsdatum, Erstellungsdatum, Name oder Studientyp
+- Auf- und absteigende Sortierreihenfolge
+- Favoriten direkt in der Studienbibliothek verwalten
+- Studien duplizieren und direkt umbenennen
+- Mehrfachauswahl zum gemeinsamen Löschen
+- Mehrfachlöschen erfolgt zuverlässig in einem einzigen Git-Commit
+- Bestehende Einzel-Löschung verwendet ebenfalls den robusten Git-Workflow
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.9.2.5
 - Geladene 2D-Studien werden vor den Eingaben für eine neue Studie angezeigt
 - Die Anzeige gespeicherter Studien benötigt keine aktuell gesetzte GPX/FIT-Datei mehr
