@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.9.4.2"
+APP_VERSION = "3.10.0"
 BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -971,6 +971,73 @@ def call_bike_power_calc(config: dict[str, Any], generate_pdf: bool = True, gene
         generate_pdf,
         generate_html_map,
     )
+
+
+def _parse_max_power_values(value: Any) -> list[float]:
+    values = [
+        float(item)
+        for item in re.findall(r"-?\d+(?:\.\d+)?", str(value))
+    ]
+    return sorted(set(values))
+
+
+def _optimization_is_active(config: dict[str, Any]) -> bool:
+    try:
+        target_np = float(config.get("Normalized Power Sollwert [W]", 0))
+    except (TypeError, ValueError):
+        target_np = 0.0
+    return (
+        target_np > 0
+        and len(
+            _parse_max_power_values(
+                config.get("max. Leistung (Liste( [W]", "")
+            )
+        ) >= 2
+    )
+
+
+def _format_power_list(values: list[float]) -> str:
+    formatted: list[str] = []
+    for value in sorted(set(float(item) for item in values)):
+        if float(value).is_integer():
+            formatted.append(str(int(value)))
+        else:
+            formatted.append(f"{value:g}")
+    return "[" + ",".join(formatted) + "]"
+
+
+def _best_optimization_row(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(result, dict):
+        return None
+    rows = result.get("optimization_results")
+    if not isinstance(rows, list):
+        return None
+    valid = [
+        row
+        for row in rows
+        if isinstance(row, dict)
+        and row.get("duration_s") is not None
+    ]
+    if not valid:
+        return None
+    return min(valid, key=lambda row: float(row["duration_s"]))
+
+
+def _fine_power_values(
+    best_power: float,
+    radius_w: float,
+    step_w: float,
+) -> list[float]:
+    if radius_w <= 0 or step_w <= 0:
+        return []
+    start = best_power - radius_w
+    end = best_power + radius_w
+    count = int(round((end - start) / step_w))
+    return [
+        round(start + index * step_w, 8)
+        for index in range(count + 1)
+        if start + index * step_w > 0
+    ]
 
 
 def run_single_simulation(
@@ -3283,6 +3350,256 @@ def render_save_calculation_to_github(
                 st.error(f"Berechnung konnte nicht gespeichert werden: {exc}")
 
 
+def render_pacing_optimization_results(
+    result: dict[str, Any] | None,
+) -> None:
+    if not isinstance(result, dict):
+        return
+
+    raw_rows = result.get("optimization_results")
+    if not isinstance(raw_rows, list):
+        return
+
+    rows = [
+        dict(row)
+        for row in raw_rows
+        if isinstance(row, dict)
+        and row.get("max_power_w") is not None
+        and row.get("duration_s") is not None
+    ]
+    unique_powers = {
+        float(row["max_power_w"])
+        for row in rows
+    }
+    try:
+        target_np = float(result.get("optimization_target_np_w", 0))
+    except (TypeError, ValueError):
+        target_np = 0.0
+
+    if target_np <= 0 or len(unique_powers) < 2:
+        return
+
+    rows.sort(key=lambda row: float(row["max_power_w"]))
+    best = min(rows, key=lambda row: float(row["duration_s"]))
+    best_time = float(best["duration_s"])
+
+    for row in rows:
+        row["time_loss_s"] = float(row["duration_s"]) - best_time
+
+    st.divider()
+    st.subheader("Pacing-Optimierung")
+    st.caption(
+        "Vergleich der getesteten maximalen Leistungen bei identischem "
+        "Normalized-Power-Sollwert."
+    )
+
+    summary_cols = st.columns(4)
+    summary_cols[0].metric(
+        "Optimale max. Leistung",
+        f"{float(best['max_power_w']):g} W",
+    )
+    summary_cols[1].metric(
+        "Leistung bei 0 %",
+        f"{float(best.get('power_at_zero_grade_w', 0)):.1f} W",
+    )
+    summary_cols[2].metric(
+        "Bestzeit",
+        format_duration(best_time),
+    )
+    summary_cols[3].metric(
+        "Ø Geschwindigkeit",
+        f"{float(best.get('average_speed_kmh', 0)):.3f} km/h",
+    )
+
+    coarse_values = result.get("optimization_coarse_power_values")
+    fine_applied = bool(result.get("optimization_fine_applied"))
+    boundary = bool(result.get("optimization_best_at_coarse_boundary"))
+
+    fine_note = result.get("optimization_fine_note")
+    if fine_applied:
+        st.success(
+            "Die optionale Feinoptimierung wurde um das beste innere "
+            "Grobergebnis ausgeführt."
+        )
+    elif fine_note:
+        st.warning(str(fine_note))
+    elif boundary and isinstance(coarse_values, list) and coarse_values:
+        st.warning(
+            "Das beste Grobergebnis liegt am Rand der vorgegebenen Liste. "
+            "Der tatsächliche optimale Wert könnte außerhalb des getesteten "
+            "Bereichs liegen; deshalb wurde die Feinoptimierung nicht automatisch "
+            "nach außen erweitert."
+        )
+
+    table_rows: list[dict[str, Any]] = []
+    for row in rows:
+        ap = row.get("average_power_w")
+        np_value = row.get("normalized_power_w")
+        vi = row.get("variability_index")
+        table_rows.append(
+            {
+                "Max. Leistung [W]": float(row["max_power_w"]),
+                "Leistung bei 0 % [W]": float(
+                    row.get("power_at_zero_grade_w", 0)
+                ),
+                "AP [W]": None if ap is None else float(ap),
+                "NP [W]": None if np_value is None else float(np_value),
+                "VI": None if vi is None else float(vi),
+                "Ø Geschwindigkeit [km/h]": float(
+                    row.get("average_speed_kmh", 0)
+                ),
+                "Fahrzeit": format_duration(float(row["duration_s"])),
+                "Zeitverlust [s]": float(row["time_loss_s"]),
+                "Optimum": (
+                    "✓"
+                    if float(row["max_power_w"])
+                    == float(best["max_power_w"])
+                    else ""
+                ),
+            }
+        )
+
+    frame = pd.DataFrame(table_rows)
+    st.dataframe(
+        frame.style.format(
+            {
+                "Max. Leistung [W]": "{:.1f}",
+                "Leistung bei 0 % [W]": "{:.1f}",
+                "AP [W]": "{:.1f}",
+                "NP [W]": "{:.1f}",
+                "VI": "{:.3f}",
+                "Ø Geschwindigkeit [km/h]": "{:.3f}",
+                "Zeitverlust [s]": "{:.1f}",
+            },
+            na_rep="—",
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    chart_cols = st.columns(2)
+    power_values = [float(row["max_power_w"]) for row in rows]
+    speed_values = [float(row.get("average_speed_kmh", 0)) for row in rows]
+    loss_values = [float(row["time_loss_s"]) for row in rows]
+
+    speed_fig = go.Figure()
+    speed_fig.add_trace(
+        go.Scatter(
+            x=power_values,
+            y=speed_values,
+            mode="lines+markers",
+            name="Ø Geschwindigkeit",
+            customdata=[
+                [float(row["duration_s"]), float(row["time_loss_s"])]
+                for row in rows
+            ],
+            hovertemplate=(
+                "Max. Leistung: %{x:.1f} W<br>"
+                "Ø Geschwindigkeit: %{y:.3f} km/h<br>"
+                "Zeitverlust: %{customdata[1]:.1f} s<extra></extra>"
+            ),
+        )
+    )
+    speed_fig.update_layout(
+        title="Geschwindigkeit abhängig von der maximalen Leistung",
+        xaxis_title="Maximale Leistung [W]",
+        yaxis_title="Ø Geschwindigkeit [km/h]",
+        margin=dict(l=20, r=20, t=55, b=20),
+    )
+    chart_cols[0].plotly_chart(speed_fig, use_container_width=True)
+
+    loss_fig = go.Figure()
+    loss_fig.add_trace(
+        go.Scatter(
+            x=power_values,
+            y=loss_values,
+            mode="lines+markers",
+            name="Zeitverlust",
+            hovertemplate=(
+                "Max. Leistung: %{x:.1f} W<br>"
+                "Zeitverlust: %{y:.1f} s<extra></extra>"
+            ),
+        )
+    )
+    loss_fig.update_layout(
+        title="Zeitverlust gegenüber dem Optimum",
+        xaxis_title="Maximale Leistung [W]",
+        yaxis_title="Zeitverlust [s]",
+        margin=dict(l=20, r=20, t=55, b=20),
+    )
+    chart_cols[1].plotly_chart(loss_fig, use_container_width=True)
+
+    @st.fragment
+    def render_robust_range() -> None:
+        default_tolerance = max(10.0, best_time * 0.0005)
+        tolerance_s = st.number_input(
+            "Toleranz für robusten Optimalbereich [s]",
+            min_value=0.1,
+            value=float(round(default_tolerance, 1)),
+            step=1.0,
+            help=(
+                "Alle getesteten Varianten mit höchstens diesem Zeitverlust "
+                "werden als praktisch gleichwertiger Optimalbereich angezeigt."
+            ),
+            key="pacing_optimization_tolerance_s",
+        )
+        robust_rows = [
+            row
+            for row in rows
+            if float(row["time_loss_s"]) <= float(tolerance_s) + 1e-9
+        ]
+        if robust_rows:
+            lower = min(float(row["max_power_w"]) for row in robust_rows)
+            upper = max(float(row["max_power_w"]) for row in robust_rows)
+            if lower == upper:
+                range_text = f"{lower:g} W"
+            else:
+                range_text = f"{lower:g}–{upper:g} W"
+            st.info(
+                f"**Robuster Optimalbereich:** {range_text}  \n"
+                f"Alle darin enthaltenen getesteten Varianten liegen höchstens "
+                f"{float(tolerance_s):.1f} Sekunden hinter der Bestzeit."
+            )
+
+        five_second = [
+            float(row["max_power_w"])
+            for row in rows
+            if float(row["time_loss_s"]) <= 5.0 + 1e-9
+        ]
+        fifteen_second = [
+            float(row["max_power_w"])
+            for row in rows
+            if float(row["time_loss_s"]) <= 15.0 + 1e-9
+        ]
+        comparison_cols = st.columns(2)
+        comparison_cols[0].metric(
+            "Innerhalb von 5 s",
+            (
+                "—"
+                if not five_second
+                else (
+                    f"{min(five_second):g} W"
+                    if min(five_second) == max(five_second)
+                    else f"{min(five_second):g}–{max(five_second):g} W"
+                )
+            ),
+        )
+        comparison_cols[1].metric(
+            "Innerhalb von 15 s",
+            (
+                "—"
+                if not fifteen_second
+                else (
+                    f"{min(fifteen_second):g} W"
+                    if min(fifteen_second) == max(fifteen_second)
+                    else f"{min(fifteen_second):g}–{max(fifteen_second):g} W"
+                )
+            ),
+        )
+
+    render_robust_range()
+
+
 def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[str, float] | None = None) -> None:
     if not result:
         return
@@ -3316,6 +3633,8 @@ def render_results(result: dict[str, Any] | None, run_log: str, profile: dict[st
         "Normalized Power",
         "—" if normalized_power is None else f"{float(normalized_power):.2f} W",
     )
+
+    render_pacing_optimization_results(result)
 
     render_save_calculation_to_github(result, run_log, profile)
 
@@ -5880,6 +6199,61 @@ def main() -> None:
         st.session_state.generate_html_map = bool(generate_html_value)
         st.session_state.refresh_weather_cache = bool(refresh_weather_value)
 
+        optimization_active = _optimization_is_active(
+            st.session_state.config
+        )
+        if optimization_active:
+            st.markdown("#### Pacing-Optimierung")
+            st.caption(
+                "Die zusätzlichen Einstellungen erscheinen nur, weil ein "
+                "positiver NP-Sollwert und mindestens zwei unterschiedliche "
+                "Maximalleistungen vorgegeben sind."
+            )
+            fine_enabled = st.checkbox(
+                "Optimum automatisch fein eingrenzen",
+                value=bool(
+                    st.session_state.get(
+                        "optimization_fine_enabled",
+                        False,
+                    )
+                ),
+                key="optimization_fine_enabled_widget",
+            )
+            fine_cols = st.columns(2)
+            with fine_cols[0]:
+                fine_radius = st.number_input(
+                    "Feinbereich ± [W]",
+                    min_value=1.0,
+                    value=float(
+                        st.session_state.get(
+                            "optimization_fine_radius_w",
+                            10.0,
+                        )
+                    ),
+                    step=1.0,
+                    disabled=not fine_enabled,
+                    key="optimization_fine_radius_widget",
+                )
+            with fine_cols[1]:
+                fine_step = st.number_input(
+                    "Feinschritt [W]",
+                    min_value=0.5,
+                    value=float(
+                        st.session_state.get(
+                            "optimization_fine_step_w",
+                            1.0,
+                        )
+                    ),
+                    step=0.5,
+                    disabled=not fine_enabled,
+                    key="optimization_fine_step_widget",
+                )
+            st.session_state.optimization_fine_enabled = bool(fine_enabled)
+            st.session_state.optimization_fine_radius_w = float(fine_radius)
+            st.session_state.optimization_fine_step_w = float(fine_step)
+        else:
+            st.session_state.optimization_fine_enabled = False
+
         st.caption(
             "Änderungen werden sofort übernommen. Dabei wird nur der "
             "Eingabebereich aktualisiert, nicht die komplette Seite."
@@ -5941,11 +6315,117 @@ def main() -> None:
                         t_calc_start = time.perf_counter()
                         if st.session_state.refresh_weather_cache:
                             bpc.clear_weather_api_cache()
+                        coarse_power_values = _parse_max_power_values(
+                            run_config.get(
+                                "max. Leistung (Liste( [W]",
+                                "",
+                            )
+                        )
+                        fine_requested = bool(
+                            st.session_state.get(
+                                "optimization_fine_enabled",
+                                False,
+                            )
+                            and _optimization_is_active(run_config)
+                        )
+
                         result = run_single_simulation(
                             run_config,
-                            generate_pdf=st.session_state.generate_pdf,
-                            generate_html_map=st.session_state.generate_html_map,
+                            generate_pdf=(
+                                st.session_state.generate_pdf
+                                and not fine_requested
+                            ),
+                            generate_html_map=(
+                                st.session_state.generate_html_map
+                                and not fine_requested
+                            ),
                         )
+                        if isinstance(result, dict):
+                            result["optimization_coarse_power_values"] = (
+                                coarse_power_values
+                            )
+                            result["optimization_fine_requested"] = (
+                                fine_requested
+                            )
+                            result["optimization_fine_applied"] = False
+
+                        if fine_requested and len(coarse_power_values) >= 3:
+                            coarse_best = _best_optimization_row(result)
+                            if coarse_best is not None:
+                                best_power = float(
+                                    coarse_best["max_power_w"]
+                                )
+                                at_boundary = (
+                                    best_power == min(coarse_power_values)
+                                    or best_power == max(coarse_power_values)
+                                )
+                                if isinstance(result, dict):
+                                    result[
+                                        "optimization_best_at_coarse_boundary"
+                                    ] = at_boundary
+
+                                if not at_boundary:
+                                    fine_values = _fine_power_values(
+                                        best_power,
+                                        float(
+                                            st.session_state.get(
+                                                "optimization_fine_radius_w",
+                                                10.0,
+                                            )
+                                        ),
+                                        float(
+                                            st.session_state.get(
+                                                "optimization_fine_step_w",
+                                                1.0,
+                                            )
+                                        ),
+                                    )
+                                    combined_values = sorted(
+                                        set(
+                                            coarse_power_values
+                                            + fine_values
+                                        )
+                                    )
+                                    fine_config = dict(run_config)
+                                    fine_config[
+                                        "max. Leistung (Liste( [W]"
+                                    ] = _format_power_list(
+                                        combined_values
+                                    )
+                                    result = run_single_simulation(
+                                        fine_config,
+                                        generate_pdf=(
+                                            st.session_state.generate_pdf
+                                        ),
+                                        generate_html_map=(
+                                            st.session_state.generate_html_map
+                                        ),
+                                    )
+                                    if isinstance(result, dict):
+                                        result[
+                                            "optimization_coarse_power_values"
+                                        ] = coarse_power_values
+                                        result[
+                                            "optimization_fine_power_values"
+                                        ] = fine_values
+                                        result[
+                                            "optimization_fine_requested"
+                                        ] = True
+                                        result[
+                                            "optimization_fine_applied"
+                                        ] = True
+                                        result[
+                                            "optimization_best_at_coarse_boundary"
+                                        ] = False
+                        elif fine_requested and isinstance(result, dict):
+                            result[
+                                "optimization_fine_note"
+                            ] = (
+                                "Für die automatische Feinoptimierung sind "
+                                "mindestens drei grobe Maximalleistungswerte "
+                                "erforderlich."
+                            )
+
                         profile["calculation_s"] = time.perf_counter() - t_calc_start
 
                     t_post_start = time.perf_counter()

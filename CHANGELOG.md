@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.10.0
+- Erweiterte Pacing-Optimierung nur bei positivem NP-Sollwert und mindestens zwei unterschiedlichen Maximalleistungen
+- Strukturierte Einzelergebnisse je getesteter Maximalleistung im Rechenkern
+- Ergebnisbox mit optimaler Maximalleistung, Leistung bei 0 %, Bestzeit und Durchschnittsgeschwindigkeit
+- Vergleichstabelle mit AP, NP, VI, Fahrzeit und Zeitverlust zum Optimum
+- Interaktives Diagramm Maximalleistung gegen Durchschnittsgeschwindigkeit
+- Interaktives Diagramm Maximalleistung gegen Zeitverlust
+- Einstellbare Zeittoleranz für den robusten Optimalbereich
+- Zusätzliche Bereiche innerhalb von 5 und 15 Sekunden zur Bestzeit
+- Optionale automatische Feinoptimierung mit einstellbarem Bereich und Schritt
+- Keine automatische Bereichserweiterung, wenn das Groboptimum am Rand liegt
+- Optimierungsdarstellungen bleiben bei normalen Einzelberechnungen vollständig ausgeblendet
+- Keine Änderung der physikalischen Berechnungsformeln
+
+
 ## 3.9.4.2
 - Rechner-Eingaben von Formularen auf Streamlit-Fragmente umgestellt
 - +/- Bedienelemente ändern den sichtbaren Zahlenwert wieder unmittelbar

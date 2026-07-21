@@ -959,7 +959,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
     global GPX_File,Hoehendaten_Glaetten,Hoehengewinn_Soll,Steigung_max_min,Start_Distance,End_Distance
     global sigma_filter,x_Achse,Histogram_Anz_Teilungen,Gaus_Filter,moving_ave_filter,Open_HTML_Map,Show_km_Markers,Show_Plots_in_Run
     global Winddamping,Wetterdatei,Use_AdvWeather,API_Weather,API_StratTime
-    global v_ave_liste,pol_a0_init,lat2,lon2
+    global v_ave_liste,optimization_results,pol_a0_init,lat2,lon2
     global API_Cache_Hits, API_Cache_Misses, API_Request_Count
     global _weather_snapshot_requests, _weather_snapshot_lookup
     global _weather_snapshot_offline, _weather_snapshot_source_path
@@ -990,6 +990,7 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         _profile_last = _now
 
     v_ave_liste=[]
+    optimization_results=[]
     API_Cache_Hits = 0
     API_Cache_Misses = 0
     API_Request_Count = 0
@@ -1063,8 +1064,27 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
                 bike_power_calc(NP_Soll)
                 _profile_mark('Bike-Power-Kalkulation Optimierungslauf')
                 print_statistics(i,True,False)
+                optimization_results.append({
+                    'max_power_w': float(power_max),
+                    'power_at_zero_grade_w': float(pol_a0),
+                    'average_power_w': float(AP),
+                    'normalized_power_w': float(NP),
+                    'variability_index': (
+                        float(NP / AP) if AP not in (0, None) else None
+                    ),
+                    'average_speed_kmh': (
+                        float(pos[-1] / t_cumm[-1] * 3600)
+                        if len(pos) > 0 and len(t_cumm) > 0 and t_cumm[-1]
+                        else None
+                    ),
+                    'duration_s': (
+                        float(t_cumm[-1])
+                        if len(t_cumm) > 0 and t_cumm[-1] is not None
+                        else None
+                    ),
+                })
                 _profile_mark('Statistik Optimierungslauf')
-            i=np.argmax(v_ave_liste)    
+            i=np.argmax(v_ave_liste)
             power_max=power_max_liste[i]
     else:
         i=0
@@ -1120,6 +1140,15 @@ def Run(Title,m_r_,m_b_,cdA_Hill_Grade_,cdA_Flat_,Draft_Save_Grade_,Draft_Save_,
         'average_speed_kmh': (pos[-1] / t_cumm[-1] * 3600) if 'pos' in globals() and 't_cumm' in globals() and len(pos) > 0 and len(t_cumm) > 0 and t_cumm[-1] not in (0, None) else None,
         'average_power_w': float(AP) if 'AP' in globals() and AP is not None else None,
         'normalized_power_w': float(NP) if 'NP' in globals() and NP is not None else None,
+        'optimization_results': (
+            list(optimization_results)
+            if 'optimization_results' in globals()
+            else []
+        ),
+        'optimization_target_np_w': float(NP_Soll) if 'NP_Soll' in globals() else None,
+        'optimization_selected_max_power_w': (
+            float(power_max) if 'power_max' in globals() else None
+        ),
         'elevation_gain_m': float(el_gain_from_height(h)) if 'h' in globals() and len(h) > 0 else None,
         'weather_api_cache': get_weather_api_cache_info() if API_Weather else None,
         'weather_snapshot': get_weather_snapshot() if API_Weather else None,
