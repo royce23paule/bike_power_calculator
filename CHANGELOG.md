@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.9.4.2
+- Rechner-Eingaben von Formularen auf Streamlit-Fragmente umgestellt
+- +/- Bedienelemente ändern den sichtbaren Zahlenwert wieder unmittelbar
+- Änderungen führen nur zu einem kleinen Fragment-Rerun statt zu einem vollständigen Seitenaufbau
+- Eingaben für neue 1D- und 2D-Studien ebenfalls in eigene Fragmente verschoben
+- Vorhandene Studien, Heatmaps und Tabellen werden beim Ändern neuer Studienwerte nicht erneut aufgebaut
+- Neue Studien werden nach Abschluss weiterhin sofort vollständig angezeigt
+- Explizite Schrittweiten für Studienbereiche und Rechnerwerte
+- Keine Änderung der Berechnungsphysik
+
+
 ## 3.9.4.1
 - Neu berechnete 1D- und 2D-Studien werden nach Abschluss sofort angezeigt
 - Nach der Berechnung erfolgt ein gezielter Rerun mit sichtbarer Abschlussmeldung

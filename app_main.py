@@ -75,7 +75,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-APP_VERSION = "3.9.4.1"
+APP_VERSION = "3.9.4.2"
 BUILD_DATE = "2026-07-20"
 ENGINE_VERSION = "1.5.1-cache-benchmark"
 
@@ -1619,139 +1619,169 @@ def render_parameter_study_1d() -> None:
         )
         return
 
-    parameter_name = st.selectbox(
-        "Parameter",
-        list(PARAMETER_STUDY_DEFINITIONS.keys()),
-        key="parameter_study_parameter",
-    )
-    definition = PARAMETER_STUDY_DEFINITIONS[parameter_name]
-    signature = re.sub(r"[^a-z0-9]+", "_", parameter_name.lower()).strip("_")
-
-    cols = st.columns(3)
-    with cols[0]:
-        start = st.number_input(
-            "Von",
-            min_value=float(definition["min"]),
-            max_value=float(definition["max"]),
-            value=float(definition["default_start"]),
-            format=str(definition["format"]),
-            key=f"parameter_study_start_{signature}",
+    @st.fragment
+    def render_1d_study_controls() -> None:
+        parameter_name = st.selectbox(
+            "Parameter",
+            list(PARAMETER_STUDY_DEFINITIONS.keys()),
+            key="parameter_study_parameter",
         )
-    with cols[1]:
-        end = st.number_input(
-            "Bis",
-            min_value=float(definition["min"]),
-            max_value=float(definition["max"]),
-            value=float(definition["default_end"]),
-            format=str(definition["format"]),
-            key=f"parameter_study_end_{signature}",
-        )
-    with cols[2]:
-        step = st.number_input(
-            "Schrittweite",
-            min_value=float(definition["min_step"]),
-            value=float(definition["default_step"]),
-            format=str(definition["format"]),
-            key=f"parameter_study_step_{signature}",
-        )
+        definition = PARAMETER_STUDY_DEFINITIONS[parameter_name]
+        signature = re.sub(
+            r"[^a-z0-9]+",
+            "_",
+            parameter_name.lower(),
+        ).strip("_")
 
-    try:
-        values = _parameter_study_values(float(start), float(end), float(step))
-    except ValueError as exc:
-        st.error(str(exc))
-        return
-
-    unit = str(definition.get("unit", ""))
-    st.metric("Anzahl Simulationen", len(values))
-    if len(values) > 25:
-        st.error(
-            "In Version 3.9.0 sind maximal 25 Simulationen pro eindimensionaler Studie erlaubt. "
-            "Bitte Bereich oder Schrittweite anpassen."
-        )
-        return
-
-    reference_config = dict(st.session_state.config)
-    reference_raw = reference_config.get(str(definition["field"]))
-    st.caption(f"Aktuelle Referenz aus dem Rechner: {reference_raw} {unit}".strip())
-
-    start_clicked = st.button(
-        "Parameterstudie starten",
-        type="primary",
-        use_container_width=True,
-        key="start_parameter_study",
-    )
-
-    if start_clicked:
-        progress = st.progress(0, text="Parameterstudie wird vorbereitet …")
-        status = st.empty()
-        study_runs: list[dict[str, Any]] = []
-        started_at = datetime.now().isoformat(timespec="seconds")
-        try:
-            for index, value in enumerate(values):
-                config = dict(reference_config)
-                _set_parameter_study_value(config, definition, value)
-                config["Titel"] = f"Studie {parameter_name} = {value:g} {unit}".strip()
-
-                status.info(
-                    f"Simulation {index + 1} von {len(values)}: "
-                    f"{parameter_name} = {value:g} {unit}".strip()
-                )
-                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                    result = run_single_simulation(
-                        config,
-                        generate_pdf=False,
-                        generate_html_map=False,
-                    )
-                study_runs.append(
-                    {
-                        "value": value,
-                        "config": config,
-                        "result": result,
-                        "summary": _parameter_study_summary_row(
-                            parameter_name,
-                            definition,
-                            value,
-                            result,
-                        ),
-                    }
-                )
-                progress.progress(
-                    int((index + 1) / len(values) * 100),
-                    text=f"{index + 1} von {len(values)} Simulationen abgeschlossen",
-                )
-
-            new_study = {
-                "id": str(uuid.uuid4()),
-                "name": f"{parameter_name} {start:g}–{end:g} {unit}".strip(),
-                "created_at": started_at,
-                "study_schema_version": 1,
-                "source_app_version": APP_VERSION,
-                "parameter": parameter_name,
-                "definition": dict(definition),
-                "start": float(start),
-                "end": float(end),
-                "step": float(step),
-                "reference_value": reference_raw,
-                "runs": study_runs,
-            }
-            set_active_parameter_study("1D", new_study, github_study_id=None)
-            st.session_state.parameter_study_calculation_message = (
-                "1D-Parameterstudie abgeschlossen."
+        cols = st.columns(3)
+        with cols[0]:
+            start = st.number_input(
+                "Von",
+                min_value=float(definition["min"]),
+                max_value=float(definition["max"]),
+                value=float(definition["default_start"]),
+                step=float(definition["min_step"]),
+                format=str(definition["format"]),
+                key=f"parameter_study_start_{signature}",
             )
-            st.rerun()
-        except Exception as exc:
-            progress.empty()
-            status.empty()
-            st.error(f"Parameterstudie abgebrochen: {exc}")
-            with st.expander("Fehlerdetails", expanded=False):
-                st.code(traceback.format_exc())
+        with cols[1]:
+            end = st.number_input(
+                "Bis",
+                min_value=float(definition["min"]),
+                max_value=float(definition["max"]),
+                value=float(definition["default_end"]),
+                step=float(definition["min_step"]),
+                format=str(definition["format"]),
+                key=f"parameter_study_end_{signature}",
+            )
+        with cols[2]:
+            step = st.number_input(
+                "Schrittweite",
+                min_value=float(definition["min_step"]),
+                value=float(definition["default_step"]),
+                step=float(definition["min_step"]),
+                format=str(definition["format"]),
+                key=f"parameter_study_step_{signature}",
+            )
+
+        try:
+            values = _parameter_study_values(
+                float(start),
+                float(end),
+                float(step),
+            )
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+
+        unit = str(definition.get("unit", ""))
+        st.metric("Anzahl Simulationen", len(values))
+        if len(values) > 25:
+            st.error(
+                "Maximal sind 25 Simulationen pro eindimensionaler Studie erlaubt. "
+                "Bitte Bereich oder Schrittweite anpassen."
+            )
+            return
+
+        reference_config = dict(st.session_state.config)
+        reference_raw = reference_config.get(str(definition["field"]))
+        st.caption(
+            f"Aktuelle Referenz aus dem Rechner: "
+            f"{reference_raw} {unit}".strip()
+        )
+
+        if st.button(
+            "Parameterstudie starten",
+            type="primary",
+            use_container_width=True,
+            key="start_parameter_study",
+        ):
+            progress = st.progress(
+                0,
+                text="Parameterstudie wird vorbereitet …",
+            )
+            status = st.empty()
+            study_runs: list[dict[str, Any]] = []
+            started_at = datetime.now().isoformat(timespec="seconds")
+            try:
+                for index, value in enumerate(values):
+                    config = dict(reference_config)
+                    _set_parameter_study_value(config, definition, value)
+                    config["Titel"] = (
+                        f"Studie {parameter_name} = {value:g} {unit}".strip()
+                    )
+                    status.info(
+                        f"Simulation {index + 1} von {len(values)}: "
+                        f"{parameter_name} = {value:g} {unit}".strip()
+                    )
+                    with contextlib.redirect_stdout(
+                        io.StringIO()
+                    ), contextlib.redirect_stderr(io.StringIO()):
+                        result = run_single_simulation(
+                            config,
+                            generate_pdf=False,
+                            generate_html_map=False,
+                        )
+                    study_runs.append(
+                        {
+                            "value": value,
+                            "config": config,
+                            "result": result,
+                            "summary": _parameter_study_summary_row(
+                                parameter_name,
+                                definition,
+                                value,
+                                result,
+                            ),
+                        }
+                    )
+                    progress.progress(
+                        int((index + 1) / len(values) * 100),
+                        text=(
+                            f"{index + 1} von {len(values)} "
+                            "Simulationen abgeschlossen"
+                        ),
+                    )
+
+                new_study = {
+                    "id": str(uuid.uuid4()),
+                    "name": (
+                        f"{parameter_name} {start:g}–{end:g} {unit}".strip()
+                    ),
+                    "created_at": started_at,
+                    "study_schema_version": 1,
+                    "source_app_version": APP_VERSION,
+                    "parameter": parameter_name,
+                    "definition": dict(definition),
+                    "start": float(start),
+                    "end": float(end),
+                    "step": float(step),
+                    "reference_value": reference_raw,
+                    "runs": study_runs,
+                }
+                set_active_parameter_study(
+                    "1D",
+                    new_study,
+                    github_study_id=None,
+                )
+                st.session_state.parameter_study_calculation_message = (
+                    "1D-Parameterstudie abgeschlossen."
+                )
+                st.rerun(scope="app")
+            except Exception as exc:
+                progress.empty()
+                status.empty()
+                st.error(f"Parameterstudie abgebrochen: {exc}")
+                with st.expander("Fehlerdetails", expanded=False):
+                    st.code(traceback.format_exc())
+
+    render_1d_study_controls()
 
     if not (
         isinstance(st.session_state.get("parameter_study"), dict)
         and st.session_state.parameter_study.get("runs")
     ):
         st.info("Noch keine Parameterstudie im aktuellen Browser-Sitzungsspeicher.")
-
 
 
 
@@ -1925,19 +1955,25 @@ def _render_parameter_range_inputs(
     with cols[0]:
         start = st.number_input(
             "Von", min_value=float(definition["min"]), max_value=float(definition["max"]),
-            value=float(definition["default_start"]), format=str(definition["format"]),
+            value=float(definition["default_start"]),
+            step=float(definition["min_step"]),
+            format=str(definition["format"]),
             key=f"{prefix}_start_{signature}",
         )
     with cols[1]:
         end = st.number_input(
             "Bis", min_value=float(definition["min"]), max_value=float(definition["max"]),
-            value=float(definition["default_end"]), format=str(definition["format"]),
+            value=float(definition["default_end"]),
+            step=float(definition["min_step"]),
+            format=str(definition["format"]),
             key=f"{prefix}_end_{signature}",
         )
     with cols[2]:
         step = st.number_input(
             "Schrittweite", min_value=float(definition["min_step"]),
-            value=float(definition["default_step"]), format=str(definition["format"]),
+            value=float(definition["default_step"]),
+            step=float(definition["min_step"]),
+            format=str(definition["format"]),
             key=f"{prefix}_step_{signature}",
         )
     values = _parameter_study_values(float(start), float(end), float(step))
@@ -1965,82 +2001,190 @@ def render_parameter_study_2d() -> None:
         )
         return
 
-    names = list(PARAMETER_STUDY_DEFINITIONS.keys())
-    select_cols = st.columns(2)
-    with select_cols[0]:
-        x_name = st.selectbox("X-Parameter", names, index=0, key="parameter_study_2d_x")
-    with select_cols[1]:
-        y_options = [name for name in names if name != x_name]
-        y_name = st.selectbox("Y-Parameter", y_options, index=0, key="parameter_study_2d_y")
-
-    x_definition = PARAMETER_STUDY_DEFINITIONS[x_name]
-    y_definition = PARAMETER_STUDY_DEFINITIONS[y_name]
-    with st.expander(f"Bereich X: {x_name}", expanded=True):
-        try:
-            x_start, x_end, x_step, x_values = _render_parameter_range_inputs(x_name, x_definition, "study2d_x")
-        except ValueError as exc:
-            st.error(str(exc)); return
-    with st.expander(f"Bereich Y: {y_name}", expanded=True):
-        try:
-            y_start, y_end, y_step, y_values = _render_parameter_range_inputs(y_name, y_definition, "study2d_y")
-        except ValueError as exc:
-            st.error(str(exc)); return
-
-    total = len(x_values) * len(y_values)
-    metrics = st.columns(3)
-    metrics[0].metric("X-Werte", len(x_values))
-    metrics[1].metric("Y-Werte", len(y_values))
-    metrics[2].metric("Simulationen", total)
-    if len(x_values) > 8 or len(y_values) > 8 or total > 36:
-        st.error("Maximal sind 8 Werte je Achse und insgesamt 36 Simulationen erlaubt. Bitte Bereich oder Schrittweite anpassen.")
-        return
-
-    reference_config = dict(st.session_state.config)
-    x_reference = reference_config.get(str(x_definition["field"]))
-    y_reference = reference_config.get(str(y_definition["field"]))
-    st.caption(f"Aktuelle Referenz: {x_name} = {x_reference} {x_definition.get('unit','')} | {y_name} = {y_reference} {y_definition.get('unit','')}")
-
-    if st.button("2D-Parameterstudie starten", type="primary", use_container_width=True, key="start_parameter_study_2d"):
-        progress = st.progress(0, text="2D-Parameterstudie wird vorbereitet …")
-        status = st.empty()
-        runs: list[dict[str, Any]] = []
-        index = 0
-        try:
-            for y_value in y_values:
-                for x_value in x_values:
-                    index += 1
-                    config = dict(reference_config)
-                    _set_parameter_study_value(config, x_definition, x_value)
-                    _set_parameter_study_value(config, y_definition, y_value)
-                    config["Titel"] = f"2D-Studie {x_name}={x_value:g}; {y_name}={y_value:g}"
-                    status.info(f"Simulation {index} von {total}: {x_name} = {x_value:g}, {y_name} = {y_value:g}")
-                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                        result = run_single_simulation(config, generate_pdf=False, generate_html_map=False)
-                    summary = _parameter_study_summary_row(x_name, x_definition, x_value, result)
-                    summary["Y-Parameter"] = y_name
-                    summary["Y-Wert"] = y_value
-                    runs.append({"x_value": x_value, "y_value": y_value, "config": config, "result": result, "summary": summary})
-                    progress.progress(int(index / total * 100), text=f"{index} von {total} Simulationen abgeschlossen")
-            new_study = {
-                "id": str(uuid.uuid4()), "created_at": datetime.now().isoformat(timespec="seconds"),
-                "name": f"{x_name} × {y_name}",
-                "study_schema_version": 1, "source_app_version": APP_VERSION,
-                "x_parameter": x_name, "y_parameter": y_name,
-                "x_definition": dict(x_definition), "y_definition": dict(y_definition),
-                "x_start": x_start, "x_end": x_end, "x_step": x_step,
-                "y_start": y_start, "y_end": y_end, "y_step": y_step,
-                "x_reference_value": x_reference, "y_reference_value": y_reference,
-                "runs": runs,
-            }
-            set_active_parameter_study("2D", new_study, github_study_id=None)
-            st.session_state.parameter_study_calculation_message = (
-                "2D-Parameterstudie abgeschlossen."
+    @st.fragment
+    def render_2d_study_controls() -> None:
+        names = list(PARAMETER_STUDY_DEFINITIONS.keys())
+        select_cols = st.columns(2)
+        with select_cols[0]:
+            x_name = st.selectbox(
+                "X-Parameter",
+                names,
+                index=0,
+                key="parameter_study_2d_x",
             )
-            st.rerun()
-        except Exception as exc:
-            progress.empty(); status.empty()
-            st.error(f"2D-Parameterstudie abgebrochen: {exc}")
-            with st.expander("Fehlerdetails", expanded=False): st.code(traceback.format_exc())
+        with select_cols[1]:
+            y_options = [name for name in names if name != x_name]
+            y_name = st.selectbox(
+                "Y-Parameter",
+                y_options,
+                index=0,
+                key="parameter_study_2d_y",
+            )
+
+        x_definition = PARAMETER_STUDY_DEFINITIONS[x_name]
+        y_definition = PARAMETER_STUDY_DEFINITIONS[y_name]
+
+        with st.expander(f"Bereich X: {x_name}", expanded=True):
+            try:
+                x_start, x_end, x_step, x_values = (
+                    _render_parameter_range_inputs(
+                        x_name,
+                        x_definition,
+                        "study2d_x",
+                    )
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+
+        with st.expander(f"Bereich Y: {y_name}", expanded=True):
+            try:
+                y_start, y_end, y_step, y_values = (
+                    _render_parameter_range_inputs(
+                        y_name,
+                        y_definition,
+                        "study2d_y",
+                    )
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+                return
+
+        total = len(x_values) * len(y_values)
+        metrics = st.columns(3)
+        metrics[0].metric("X-Werte", len(x_values))
+        metrics[1].metric("Y-Werte", len(y_values))
+        metrics[2].metric("Simulationen", total)
+
+        if len(x_values) > 8 or len(y_values) > 8 or total > 36:
+            st.error(
+                "Maximal sind 8 Werte je Achse und insgesamt 36 "
+                "Simulationen erlaubt. Bitte Bereich oder Schrittweite anpassen."
+            )
+            return
+
+        reference_config = dict(st.session_state.config)
+        x_reference = reference_config.get(str(x_definition["field"]))
+        y_reference = reference_config.get(str(y_definition["field"]))
+        st.caption(
+            f"Aktuelle Referenz: {x_name} = {x_reference} "
+            f"{x_definition.get('unit', '')} | "
+            f"{y_name} = {y_reference} {y_definition.get('unit', '')}"
+        )
+        st.caption(
+            "Änderungen in diesem Bereich aktualisieren nur die Eingaben. "
+            "Die vorhandene Heatmap wird dabei nicht neu aufgebaut."
+        )
+
+        if st.button(
+            "2D-Parameterstudie starten",
+            type="primary",
+            use_container_width=True,
+            key="start_parameter_study_2d",
+        ):
+            progress = st.progress(
+                0,
+                text="2D-Parameterstudie wird vorbereitet …",
+            )
+            status = st.empty()
+            runs: list[dict[str, Any]] = []
+            index = 0
+            try:
+                for y_value in y_values:
+                    for x_value in x_values:
+                        index += 1
+                        config = dict(reference_config)
+                        _set_parameter_study_value(
+                            config,
+                            x_definition,
+                            x_value,
+                        )
+                        _set_parameter_study_value(
+                            config,
+                            y_definition,
+                            y_value,
+                        )
+                        config["Titel"] = (
+                            f"2D-Studie {x_name}={x_value:g}; "
+                            f"{y_name}={y_value:g}"
+                        )
+                        status.info(
+                            f"Simulation {index} von {total}: "
+                            f"{x_name} = {x_value:g}, "
+                            f"{y_name} = {y_value:g}"
+                        )
+                        with contextlib.redirect_stdout(
+                            io.StringIO()
+                        ), contextlib.redirect_stderr(io.StringIO()):
+                            result = run_single_simulation(
+                                config,
+                                generate_pdf=False,
+                                generate_html_map=False,
+                            )
+                        summary = _parameter_study_summary_row(
+                            x_name,
+                            x_definition,
+                            x_value,
+                            result,
+                        )
+                        summary["Y-Parameter"] = y_name
+                        summary["Y-Wert"] = y_value
+                        runs.append(
+                            {
+                                "x_value": x_value,
+                                "y_value": y_value,
+                                "config": config,
+                                "result": result,
+                                "summary": summary,
+                            }
+                        )
+                        progress.progress(
+                            int(index / total * 100),
+                            text=(
+                                f"{index} von {total} "
+                                "Simulationen abgeschlossen"
+                            ),
+                        )
+
+                new_study = {
+                    "id": str(uuid.uuid4()),
+                    "created_at": datetime.now().isoformat(
+                        timespec="seconds"
+                    ),
+                    "name": f"{x_name} × {y_name}",
+                    "study_schema_version": 1,
+                    "source_app_version": APP_VERSION,
+                    "x_parameter": x_name,
+                    "y_parameter": y_name,
+                    "x_definition": dict(x_definition),
+                    "y_definition": dict(y_definition),
+                    "x_start": x_start,
+                    "x_end": x_end,
+                    "x_step": x_step,
+                    "y_start": y_start,
+                    "y_end": y_end,
+                    "y_step": y_step,
+                    "x_reference_value": x_reference,
+                    "y_reference_value": y_reference,
+                    "runs": runs,
+                }
+                set_active_parameter_study(
+                    "2D",
+                    new_study,
+                    github_study_id=None,
+                )
+                st.session_state.parameter_study_calculation_message = (
+                    "2D-Parameterstudie abgeschlossen."
+                )
+                st.rerun(scope="app")
+            except Exception as exc:
+                progress.empty()
+                status.empty()
+                st.error(f"2D-Parameterstudie abgebrochen: {exc}")
+                with st.expander("Fehlerdetails", expanded=False):
+                    st.code(traceback.format_exc())
+
+    render_2d_study_controls()
 
     if not (
         isinstance(st.session_state.get("parameter_study_2d"), dict)
@@ -2050,6 +2194,7 @@ def render_parameter_study_2d() -> None:
             "Noch keine zweidimensionale Parameterstudie "
             "im aktuellen Browser-Sitzungsspeicher."
         )
+
 
 
 def render_parameter_study() -> None:
@@ -5657,27 +5802,30 @@ def main() -> None:
     if weather_path:
         st.session_state.config["Wetterdatei Advanced Weather"] = weather_path
 
-    # Gepufferte Eingabe: Änderungen innerhalb des Formulars verursachen
-    # keinen vollständigen Streamlit-Rerun. Erst einer der beiden Buttons
-    # übernimmt alle Werte gemeinsam.
-    with st.form("calculator_settings_form", clear_on_submit=False):
+    # Fragment-Eingabe: Änderungen der Zahlenfelder aktualisieren nur diesen
+    # kleinen Bereich. Dadurch funktionieren die +/- Bedienelemente sichtbar,
+    # ohne dass Ergebnisse, Karten und Diagramme vollständig neu aufgebaut werden.
+    @st.fragment
+    def render_calculator_settings_fragment() -> None:
+        fragment_config = st.session_state.config.copy()
+
         tab_keys = ["basis", "aero", "leistung", "wetter", "strecke", "ausgabe"]
         tabs = st.tabs([GROUP_TITLES[key] for key in tab_keys])
 
-        updated = {}
+        updated: dict[str, Any] = {}
         for tab, group_key in zip(tabs, tab_keys):
             with tab:
-                updated.update(render_group(group_key, config))
+                updated.update(render_group(group_key, fragment_config))
 
         if route_path:
             updated["GPX/FIT Datei"] = route_path
-        elif config.get("GPX/FIT Datei"):
-            updated["GPX/FIT Datei"] = config.get("GPX/FIT Datei")
+        elif fragment_config.get("GPX/FIT Datei"):
+            updated["GPX/FIT Datei"] = fragment_config.get("GPX/FIT Datei")
 
         if weather_path:
             updated["Wetterdatei Advanced Weather"] = weather_path
-        elif config.get("Wetterdatei Advanced Weather"):
-            updated["Wetterdatei Advanced Weather"] = config.get(
+        elif fragment_config.get("Wetterdatei Advanced Weather"):
+            updated["Wetterdatei Advanced Weather"] = fragment_config.get(
                 "Wetterdatei Advanced Weather"
             )
 
@@ -5692,7 +5840,7 @@ def main() -> None:
                     "Ausschalten spart typischerweise mehrere Sekunden. "
                     "Download und PDF-Vorschau entfallen dann."
                 ),
-                key="calculator_form_generate_pdf",
+                key="calculator_fragment_generate_pdf",
             )
         with out_col2:
             generate_html_value = st.checkbox(
@@ -5702,13 +5850,13 @@ def main() -> None:
                     "Ausschalten spart etwas Zeit. "
                     "Die interaktiven Diagramme bleiben erhalten."
                 ),
-                key="calculator_form_generate_html",
+                key="calculator_fragment_generate_html",
             )
 
         weather_mode = str(
             updated.get(
                 "Verwendung Advanced Weather",
-                config.get("Verwendung Advanced Weather", ""),
+                fragment_config.get("Verwendung Advanced Weather", ""),
             )
         )
         if weather_mode.startswith("True,True"):
@@ -5720,48 +5868,56 @@ def main() -> None:
                     "Ohne Haken werden identische Abfragen bis zu 30 Tage "
                     "wiederverwendet."
                 ),
-                key="calculator_form_refresh_weather",
+                key="calculator_fragment_refresh_weather",
             )
         else:
             refresh_weather_value = False
 
-        st.caption(
-            "Mehrere Werte können nacheinander geändert werden. "
-            "Die Seite wird erst nach einem der beiden Buttons neu aufgebaut."
-        )
-
-        apply_col, run_col = st.columns(2)
-        with apply_col:
-            apply_clicked = st.form_submit_button(
-                "Einstellungen übernehmen",
-                use_container_width=True,
-            )
-        with run_col:
-            start_clicked = st.form_submit_button(
-                "Berechnung starten",
-                type="primary",
-                use_container_width=True,
-            )
-
-    if apply_clicked or start_clicked:
+        # Der Fragment-Rerun ist klein und schnell; die Konfiguration darf daher
+        # bei jeder sichtbaren Änderung direkt synchronisiert werden.
         st.session_state.config = normalize_loaded_config(updated)
         st.session_state.generate_pdf = bool(generate_pdf_value)
         st.session_state.generate_html_map = bool(generate_html_value)
         st.session_state.refresh_weather_cache = bool(refresh_weather_value)
 
-    if apply_clicked and not start_clicked:
-        st.success("Einstellungen wurden übernommen.")
+        st.caption(
+            "Änderungen werden sofort übernommen. Dabei wird nur der "
+            "Eingabebereich aktualisiert, nicht die komplette Seite."
+        )
 
-    if st.session_state.generate_pdf or st.session_state.generate_html_map:
-        st.info(
-            "Die Berechnung erzeugt die ausgewählten Ausgaben. "
-            "Für schnelle Tests kannst du PDF/Karte deaktivieren."
-        )
-    else:
-        st.info(
-            "Schnellmodus aktiv: Es werden nur Berechnung und "
-            "interaktive Diagramme erzeugt."
-        )
+        apply_col, run_col = st.columns(2)
+        with apply_col:
+            if st.button(
+                "Einstellungen übernommen",
+                use_container_width=True,
+                key="calculator_fragment_apply",
+            ):
+                st.success("Einstellungen sind aktuell.")
+        with run_col:
+            if st.button(
+                "Berechnung starten",
+                type="primary",
+                use_container_width=True,
+                key="calculator_fragment_start",
+            ):
+                st.session_state.pending_calculation_start = True
+                st.rerun(scope="app")
+
+        if st.session_state.generate_pdf or st.session_state.generate_html_map:
+            st.info(
+                "Die Berechnung erzeugt die ausgewählten Ausgaben. "
+                "Für schnelle Tests kannst du PDF/Karte deaktivieren."
+            )
+        else:
+            st.info(
+                "Schnellmodus aktiv: Es werden nur Berechnung und "
+                "interaktive Diagramme erzeugt."
+            )
+
+    render_calculator_settings_fragment()
+    start_clicked = bool(
+        st.session_state.pop("pending_calculation_start", False)
+    )
 
     if start_clicked:
         if not st.session_state.config.get("GPX/FIT Datei"):
